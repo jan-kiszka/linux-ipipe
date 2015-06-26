@@ -110,6 +110,7 @@ struct ipipe_trap_data {
 #define IPIPE_KEVT_CLEANUP	5
 #define IPIPE_KEVT_HOSTRT	6
 #define IPIPE_KEVT_CLOCKFREQ	7
+#define IPIPE_KEVT_USERINTRET	8
 
 struct ipipe_vm_notifier {
 	void (*handler)(struct ipipe_vm_notifier *nfy);
@@ -179,6 +180,8 @@ void __ipipe_flush_printk(unsigned int irq, void *cookie);
 int __ipipe_notify_syscall(struct pt_regs *regs);
 
 int __ipipe_notify_trap(int exception, struct pt_regs *regs);
+
+int __ipipe_notify_user_intreturn(void);
 
 int __ipipe_notify_kevent(int event, void *data);
 
@@ -330,6 +333,8 @@ static inline void __ipipe_init_taskinfo(struct task_struct *p) { }
 static inline void __ipipe_exit_vm(void) { }
 
 static inline void __ipipe_notify_vm_preemption(void) { }
+
+#define __ipipe_notify_user_intreturn()	0
 
 static inline void ipipe_root_only(void) { }
 

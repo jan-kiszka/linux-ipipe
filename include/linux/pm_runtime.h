@@ -125,6 +125,13 @@ static inline bool pm_runtime_is_irq_safe(struct device *dev)
 
 #else /* !CONFIG_PM */
 
+static inline bool queue_pm_work(struct work_struct *work) { return false; }
+
+static inline int pm_generic_runtime_suspend(struct device *dev) { return 0; }
+static inline int pm_generic_runtime_resume(struct device *dev) { return 0; }
+static inline int pm_runtime_force_suspend(struct device *dev) { return 0; }
+static inline int pm_runtime_force_resume(struct device *dev) { return 0; }
+
 static inline int __pm_runtime_idle(struct device *dev, int rpmflags)
 {
 	return -ENOSYS;

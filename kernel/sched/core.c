@@ -8432,13 +8432,13 @@ EXPORT_SYMBOL_GPL(__ipipe_migrate_head);
 
 void __ipipe_reenter_root(void)
 {
-	struct rq *rq = this_rq();
+	struct rq *rq;
 	struct task_struct *p;
 
 	p = __this_cpu_read(ipipe_percpu.rqlock_owner);
 	BUG_ON(p == NULL);
 	ipipe_clear_thread_flag(TIP_HEAD);
-	finish_task_switch(rq, p);
+	rq = finish_task_switch(p);
 	post_schedule(rq);
 	sched_preempt_enable_no_resched();
 }

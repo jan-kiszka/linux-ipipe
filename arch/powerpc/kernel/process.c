@@ -37,9 +37,9 @@
 #include <linux/personality.h>
 #include <linux/random.h>
 #include <linux/hw_breakpoint.h>
+#include <linux/uaccess.h>
 
 #include <asm/pgtable.h>
-#include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/processor.h>
 #include <asm/mmu.h>
@@ -935,12 +935,8 @@ static void show_instructions(struct pt_regs *regs)
 			pc = (unsigned long)phys_to_virt(pc);
 #endif
 
-		/* We use __get_user here *only* to avoid an OOPS on a
-		 * bad address because the pc *should* only be a
-		 * kernel address.
-		 */
 		if (!__kernel_text_address(pc) ||
-		     __get_user(instr, (unsigned int __user *)pc)) {
+		     probe_kernel_address((unsigned int __user *)pc, instr)) {
 			printk(KERN_CONT "XXXXXXXX ");
 		} else {
 			if (regs->nip == pc)
@@ -1570,13 +1566,6 @@ void show_stack(struct task_struct *tsk, unsigned long *stack)
 	int curr_frame = current->curr_ret_stack;
 	extern void return_to_handler(void);
 	unsigned long rth = (unsigned long)return_to_handler;
-	unsigned long mrth = -1;
-#ifdef CONFIG_PPC64
-	extern void mod_return_to_handler(void);
-	rth = *(unsigned long *)rth;
-	mrth = (unsigned long)mod_return_to_handler;
-	mrth = *(unsigned long *)mrth;
-#endif
 #endif
 
 	sp = (unsigned long) stack;
@@ -1601,7 +1590,7 @@ void show_stack(struct task_struct *tsk, unsigned long *stack)
 		if (!firstframe || ip != lr) {
 			printk("["REG"] ["REG"] %pS", sp, ip, (void *)ip);
 #ifdef CONFIG_FUNCTION_GRAPH_TRACER
-			if ((ip == rth || ip == mrth) && curr_frame >= 0) {
+			if ((ip == rth) && curr_frame >= 0) {
 				printk(" (%pS)",
 				       (void *)current->ret_stack[curr_frame].ret);
 				curr_frame--;
@@ -1704,12 +1693,3 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 	return ret;
 }
 
-unsigned long randomize_et_dyn(unsigned long base)
-{
-	unsigned long ret = PAGE_ALIGN(base + brk_rnd());
-
-	if (ret < base)
-		return base;
-
-	return ret;
-}

@@ -585,7 +585,7 @@ static void setup_APIC_timer(void)
 	levt->cpumask = cpumask_of(smp_processor_id());
 #ifdef CONFIG_IPIPE
 	if (!(lapic_clockevent.features & CLOCK_EVT_FEAT_DUMMY))
-		levt->ipipe_timer = &__get_cpu_var(lapic_itimer);
+		levt->ipipe_timer = this_cpu_ptr(&lapic_itimer);
 	else {
 		static atomic_t once = ATOMIC_INIT(-1);
 		if (atomic_inc_and_test(&once))

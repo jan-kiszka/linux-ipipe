@@ -500,7 +500,7 @@ void ___do_irq(unsigned int irq, struct pt_regs *regs)
 
 	/* And finally process it */
 	if (unlikely(irq == NO_IRQ))
-		__get_cpu_var(irq_stat).spurious_irqs++;
+		__this_cpu_inc(irq_stat.spurious_irqs);
 	else
 		generic_handle_irq(irq);
 

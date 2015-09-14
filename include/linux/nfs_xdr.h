@@ -293,6 +293,7 @@ struct nfs4_layoutreturn_args {
 	struct nfs4_sequence_args seq_args;
 	struct pnfs_layout_hdr *layout;
 	struct inode *inode;
+	struct pnfs_layout_range range;
 	nfs4_stateid stateid;
 	__u32   layout_type;
 };
@@ -389,7 +390,7 @@ struct nfs_open_confirmres {
 struct nfs_closeargs {
 	struct nfs4_sequence_args	seq_args;
 	struct nfs_fh *         fh;
-	nfs4_stateid *		stateid;
+	nfs4_stateid 		stateid;
 	struct nfs_seqid *	seqid;
 	fmode_t			fmode;
 	const u32 *		bitmask;
@@ -416,12 +417,13 @@ struct nfs_lock_args {
 	struct nfs_fh *		fh;
 	struct file_lock *	fl;
 	struct nfs_seqid *	lock_seqid;
-	nfs4_stateid *		lock_stateid;
+	nfs4_stateid		lock_stateid;
 	struct nfs_seqid *	open_seqid;
-	nfs4_stateid *		open_stateid;
+	nfs4_stateid		open_stateid;
 	struct nfs_lowner	lock_owner;
 	unsigned char		block : 1;
 	unsigned char		reclaim : 1;
+	unsigned char		new_lock : 1;
 	unsigned char		new_lock_owner : 1;
 };
 
@@ -437,7 +439,7 @@ struct nfs_locku_args {
 	struct nfs_fh *		fh;
 	struct file_lock *	fl;
 	struct nfs_seqid *	seqid;
-	nfs4_stateid *		stateid;
+	nfs4_stateid 		stateid;
 };
 
 struct nfs_locku_res {
@@ -513,6 +515,7 @@ struct nfs_pgio_res {
 	struct nfs4_sequence_res	seq_res;
 	struct nfs_fattr *	fattr;
 	__u32			count;
+	__u32			op_status;
 	int			eof;		/* used by read */
 	struct nfs_writeverf *	verf;		/* used by write */
 	const struct nfs_server *server;	/* used by write */
@@ -532,6 +535,7 @@ struct nfs_commitargs {
 
 struct nfs_commitres {
 	struct nfs4_sequence_res	seq_res;
+	__u32			op_status;
 	struct nfs_fattr	*fattr;
 	struct nfs_writeverf	*verf;
 	const struct nfs_server *server;
@@ -1325,7 +1329,8 @@ struct nfs_pgio_header {
 	__u64			mds_offset;	/* Filelayout dense stripe */
 	struct nfs_page_array	page_array;
 	struct nfs_client	*ds_clp;	/* pNFS data server */
-	int			ds_idx;		/* ds index if ds_clp is set */
+	int			ds_commit_idx;	/* ds index if ds_clp is set */
+	int			pgio_mirror_idx;/* mirror index in pgio layer */
 };
 
 struct nfs_mds_commit_info {

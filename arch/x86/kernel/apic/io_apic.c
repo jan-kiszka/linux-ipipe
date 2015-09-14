@@ -2009,7 +2009,6 @@ static void ack_ioapic_level(struct irq_data *data)
 	struct irq_cfg *cfg = irqd_cfg(data);
 	int i, irq = data->irq;
 	unsigned long v;
-	int i;
 #ifndef CONFIG_IPIPE
 	bool masked;
 

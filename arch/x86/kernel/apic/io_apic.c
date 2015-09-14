@@ -507,7 +507,7 @@ static void mask_ioapic(unsigned int irq, struct irq_cfg *cfg)
 
 static void mask_ioapic_irq(struct irq_data *data)
 {
-	mask_ioapic(data->irq, data->chip_data);
+	mask_ioapic(data->irq, irqd_cfg(data));
 }
 
 static void __unmask_ioapic(struct irq_cfg *cfg)
@@ -527,7 +527,7 @@ static void unmask_ioapic(unsigned int irq, struct irq_cfg *cfg)
 
 static void unmask_ioapic_irq(struct irq_data *data)
 {
-	unmask_ioapic(data->irq, data->chip_data);
+	unmask_ioapic(data->irq, irqd_cfg(data));
 }
 
 /*
@@ -1831,7 +1831,7 @@ static unsigned int startup_ioapic_irq(struct irq_data *data)
 		if (legacy_pic->irq_pending(irq))
 			was_pending = 1;
 	}
-	__unmask_ioapic(data->chip_data);
+	__unmask_ioapic(irqd_cfg(data));
 	ipipe_unlock_irq(irq);
 	raw_spin_unlock_irqrestore(&ioapic_lock, flags);
 
@@ -1883,7 +1883,7 @@ int native_ioapic_set_affinity(struct irq_data *data,
 	if (!ret) {
 		/* Only the high 8 bits are valid. */
 		dest = SET_APIC_LOGICAL_ID(dest);
-		__target_IO_APIC_irq(irq, dest, data->chip_data);
+		__target_IO_APIC_irq(irq, dest, irqd_cfg(data));
 		ret = IRQ_SET_MASK_OK_NOCOPY;
 	}
 	raw_spin_unlock_irqrestore(&ioapic_lock, flags);
@@ -2006,12 +2006,12 @@ void move_xxapic_irq(struct irq_data *data)
 
 static void ack_ioapic_level(struct irq_data *data)
 {
-	struct irq_cfg *cfg = data->chip_data;
+	struct irq_cfg *cfg = irqd_cfg(data);
+	int i, irq = data->irq;
 	unsigned long v;
 	int i;
 #ifndef CONFIG_IPIPE
 	bool masked;
-	int irq = data->irq;
 
 	irq_complete_move(cfg);
 	masked = ioapic_irqd_mask(data, cfg);

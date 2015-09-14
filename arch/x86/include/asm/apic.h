@@ -448,6 +448,9 @@ static inline void apic_set_eoi_write(void (*eoi_write)(u32 reg, u32 v)) {}
 #ifdef CONFIG_IPIPE
 #define ack_APIC_irq() do { } while(0)
 static inline void __ack_APIC_irq(void)
+#ifdef CONFIG_SMP
+void move_xxapic_irq(struct irq_data *data);
+#endif /* CONFIG_SMP */
 #else /* !CONFIG_IPIPE */
 #define __ack_APIC_irq() ack_APIC_irq()
 static inline void ack_APIC_irq(void)

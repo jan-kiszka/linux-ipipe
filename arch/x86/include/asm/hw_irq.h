@@ -191,7 +191,8 @@ extern __visible void smp_invalidate_interrupt(struct pt_regs *);
 extern asmlinkage void smp_reboot_interrupt(void);
 #endif
 
-extern void (*__initconst interrupt[NR_VECTORS-FIRST_EXTERNAL_VECTOR])(void);
+extern void (*__initconst interrupt[FIRST_SYSTEM_VECTOR
+				    - FIRST_EXTERNAL_VECTOR])(void);
 #ifdef CONFIG_TRACING
 #define trace_interrupt interrupt
 #endif

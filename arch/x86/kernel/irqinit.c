@@ -124,7 +124,6 @@ void setup_vector_irq(int cpu)
 static void __init smp_intr_init(void)
 {
 #ifdef CONFIG_SMP
-#if defined(CONFIG_X86_64) || defined(CONFIG_X86_LOCAL_APIC)
 	unsigned __maybe_unused cpu;
 	int __maybe_unused ret;
 
@@ -158,7 +157,6 @@ static void __init smp_intr_init(void)
 	__alloc_intr_gate(IPIPE_RESCHEDULE_VECTOR, ipipe_reschedule_interrupt);
 	__alloc_intr_gate(IPIPE_CRITICAL_VECTOR, ipipe_critical_interrupt);
 #endif
-#endif
 #endif /* CONFIG_SMP */
 }
 
@@ -173,7 +171,7 @@ static void __init apic_intr_init(void)
 	alloc_intr_gate(THRESHOLD_APIC_VECTOR, threshold_interrupt);
 #endif
 
-#if defined(CONFIG_X86_64) || defined(CONFIG_X86_LOCAL_APIC)
+#ifdef CONFIG_X86_LOCAL_APIC
 	/* self generated IPI for local APIC timer */
 	alloc_intr_gate(LOCAL_TIMER_VECTOR, apic_timer_interrupt);
 
@@ -214,10 +212,17 @@ void __init native_init_IRQ(void)
 	 * 'special' SMP interrupts)
 	 */
 	i = FIRST_EXTERNAL_VECTOR;
-	for_each_clear_bit_from(i, used_vectors, NR_VECTORS) {
+#ifndef CONFIG_X86_LOCAL_APIC
+#define first_system_vector NR_VECTORS
+#endif
+	for_each_clear_bit_from(i, used_vectors, first_system_vector) {
 		/* IA32_SYSCALL_VECTOR could be used in trap_init already. */
 		set_intr_gate(i, interrupt[i - FIRST_EXTERNAL_VECTOR]);
 	}
+#ifdef CONFIG_X86_LOCAL_APIC
+	for_each_clear_bit_from(i, used_vectors, NR_VECTORS)
+		set_intr_gate(i, spurious_interrupt);
+#endif
 
 	if (!acpi_ioapic && !of_ioapic && nr_legacy_irqs())
 		setup_irq(2, &irq2);

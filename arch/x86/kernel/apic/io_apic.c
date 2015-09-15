@@ -2010,9 +2010,10 @@ void move_xxapic_irq(struct irq_data *data)
 static void ack_ioapic_level(struct irq_data *data)
 {
 	struct irq_cfg *cfg = irqd_cfg(data);
-	int i, irq = data->irq;
+	int i;
 	unsigned long v;
 #ifndef CONFIG_IPIPE
+	int irq = data->irq;
 	bool masked;
 
 	irq_complete_move(cfg);

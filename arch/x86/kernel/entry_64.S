@@ -82,7 +82,7 @@
 	cmpl $__NR_syscall_max,%e\reg
 #endif
 .endm
-	
+
 	.code64
 	.section .entry.text, "ax"
 
@@ -388,7 +388,7 @@ no_fastcall:
 slow_path:
 #endif /* !CONFIG_IPIPE_LEGACY */
 	testl $_TIP_NOTIFY,TI_ipipe+THREAD_INFO(%rsp,RIP-ARGOFFSET)
-	jnz pipeline_syscall 
+	jnz pipeline_syscall
 	test_syscall_nr ax
 	jb root_syscall
 pipeline_syscall:
@@ -426,15 +426,12 @@ system_call_fastpath:
  * Has incomplete stack frame and undefined top of stack.
  */
 ret_from_sys_call:
-	movl $_TIF_ALLWORK_MASK,%edi
-	/* edi:	flagmask */
-sysret_check:
+	testl $_TIF_ALLWORK_MASK,TI_flags+THREAD_INFO(%rsp,RIP-ARGOFFSET)
+	jnz int_ret_from_sys_call_fixup	/* Go the the slow path */
+
 	LOCKDEP_SYS_EXIT
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
-	movl TI_flags+THREAD_INFO(%rsp,RIP-ARGOFFSET),%edx
-	andl %edi,%edx
-	jnz  sysret_careful
 	CFI_REMEMBER_STATE
 	/*
 	 * sysretq will re-enable interrupts:
@@ -449,61 +446,10 @@ sysret_fastexit:
 	USERGS_SYSRET64
 
 	CFI_RESTORE_STATE
-	/* Handle reschedules */
-	/* edx:	work, edi: workmask */
-sysret_careful:
-	testl $(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT|_TIF_SECCOMP),%edx
-	jnz ret_from_sys_call_trace
-	bt $TIF_NEED_RESCHED,%edx
-	jnc sysret_signal
-	TRACE_IRQS_ON
-	ENABLE_INTERRUPTS(CLBR_NONE)
-	pushq_cfi %rdi
-	SCHEDULE_USER
-	popq_cfi %rdi
-	jmp sysret_check
 
-ret_from_sys_call_trace:
-	TRACE_IRQS_ON
-	sti
-	SAVE_REST
-	FIXUP_TOP_OF_STACK %rdi
-	movq %rsp,%rdi
-	LOAD_ARGS ARGOFFSET  /* reload args from stack in case ptrace changed it */
-	RESTORE_REST
-	jmp int_ret_from_sys_call
-
-	/* Handle a signal */
-sysret_signal:
-	TRACE_IRQS_ON
-	ENABLE_INTERRUPTS(CLBR_NONE)
-#ifdef CONFIG_AUDITSYSCALL
-	bt $TIF_SYSCALL_AUDIT,%edx
-	jc sysret_audit
-#endif
-	/*
-	 * We have a signal, or exit tracing or single-step.
-	 * These all wind up with the iret return path anyway,
-	 * so just join that path right now.
-	 */
+int_ret_from_sys_call_fixup:
 	FIXUP_TOP_OF_STACK %r11, -ARGOFFSET
-	jmp int_check_syscall_exit_work
-
-#ifdef CONFIG_AUDITSYSCALL
-	/*
-	 * Return fast path for syscall audit.  Call __audit_syscall_exit()
-	 * directly and then jump back to the fast path with TIF_SYSCALL_AUDIT
-	 * masked off.
-	 */
-sysret_audit:
-	movq RAX-ARGOFFSET(%rsp),%rsi	/* second arg, syscall return value */
-	cmpq $-MAX_ERRNO,%rsi	/* is it < -MAX_ERRNO? */
-	setbe %al		/* 1 if so, 0 if not */
-	movzbl %al,%edi		/* zero-extend that into %edi */
-	call __audit_syscall_exit
-	movl $(_TIF_ALLWORK_MASK & ~_TIF_SYSCALL_AUDIT),%edi
-	jmp sysret_check
-#endif	/* CONFIG_AUDITSYSCALL */
+	jmp int_ret_from_sys_call
 
 	/* Do syscall tracing */
 tracesys:
@@ -814,7 +760,7 @@ END(interrupt)
 	 * moving irq_enter into assembly, which would be too much work)
 	 */
 1:	incl PER_CPU_VAR(irq_count)
-#ifndef CONFIG_IPIPE	
+#ifndef CONFIG_IPIPE
 	cmovzq PER_CPU_VAR(irq_stack_ptr),%rsp
 	CFI_DEF_CFA_REGISTER	rsi
 #endif
@@ -827,7 +773,7 @@ END(interrupt)
 			0x08 /* DW_OP_const1u */, SS+8-RBP, \
 			0x22 /* DW_OP_plus */
 	/* We entered an interrupt context - irqs are off: */
-#ifndef CONFIG_IPIPE	
+#ifndef CONFIG_IPIPE
 	TRACE_IRQS_OFF
 #endif
 #ifdef CONFIG_IPIPE_TRACE_IRQSOFF
@@ -1283,7 +1229,7 @@ ENTRY(\sym)
 	jmp retint_swapgs_notrace
 	.endif
 1:
-#endif	
+#endif
 
 	.if \shift_ist != -1
 	addq $EXCEPTION_STKSZ, INIT_TSS_IST(\shift_ist)

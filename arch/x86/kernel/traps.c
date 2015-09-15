@@ -829,19 +829,17 @@ void math_state_restore(void)
 	}
 
 	flags = hard_cond_local_irq_save();
+	/* Avoid __kernel_fpu_begin() right after __thread_fpu_begin() */
+	kernel_fpu_disable();
 	__thread_fpu_begin(tsk);
-
-	/*
-	 * Paranoid restore. send a SIGSEGV if we fail to restore the state.
-	 */
 	if (unlikely(restore_fpu_checking(tsk))) {
 		drop_init_fpu(tsk);
-		hard_cond_local_irq_enable();
 		force_sig_info(SIGSEGV, SEND_SIG_PRIV, tsk);
-		return;
+	} else {
+		tsk->thread.fpu_counter++;
 	}
 
-	tsk->thread.fpu_counter++;
+	kernel_fpu_enable();
 	hard_cond_local_irq_restore(flags);
 }
 EXPORT_SYMBOL_GPL(math_state_restore);

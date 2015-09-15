@@ -49,10 +49,10 @@ struct usb_line6_toneport {
 	int source;
 
 	/* Serial number of device */
-	int serial_number;
+	u32 serial_number;
 
 	/* Firmware version (x 100) */
-	int firmware_version;
+	u8 firmware_version;
 
 	/* Timer for delayed PCM startup */
 	struct timer_list timer;
@@ -278,12 +278,17 @@ static struct snd_kcontrol_new toneport_control_source = {
 	(void cmd_0x02(byte red, byte green)
 */
 
-static bool toneport_has_led(enum line6_device_type type)
+static bool toneport_has_led(struct usb_line6_toneport *toneport)
 {
-	return
-	    (type == LINE6_GUITARPORT) ||
-	    (type == LINE6_TONEPORT_GX);
+	switch (toneport->type) {
+	case LINE6_GUITARPORT:
+	case LINE6_TONEPORT_GX:
 	/* add your device here if you are missing support for the LEDs */
+		return true;
+
+	default:
+		return false;
+	}
 }
 
 static const char * const led_colors[2] = { "red", "green" };
@@ -343,6 +348,20 @@ static void toneport_remove_leds(struct usb_line6_toneport *toneport)
 	}
 }
 
+static bool toneport_has_source_select(struct usb_line6_toneport *toneport)
+{
+	switch (toneport->type) {
+	case LINE6_TONEPORT_UX1:
+	case LINE6_TONEPORT_UX2:
+	case LINE6_PODSTUDIO_UX1:
+	case LINE6_PODSTUDIO_UX2:
+		return true;
+
+	default:
+		return false;
+	}
+}
+
 /*
 	Setup Toneport device.
 */
@@ -360,19 +379,12 @@ static void toneport_setup(struct usb_line6_toneport *toneport)
 	toneport_send_cmd(usbdev, 0x0301, 0x0000);
 
 	/* initialize source select: */
-	switch (toneport->type) {
-	case LINE6_TONEPORT_UX1:
-	case LINE6_TONEPORT_UX2:
-	case LINE6_PODSTUDIO_UX1:
-	case LINE6_PODSTUDIO_UX2:
+	if (toneport_has_source_select(toneport))
 		toneport_send_cmd(usbdev,
 				  toneport_source_info[toneport->source].code,
 				  0x0000);
-	default:
-		break;
-	}
 
-	if (toneport_has_led(toneport->type))
+	if (toneport_has_led(toneport))
 		toneport_update_led(toneport);
 
 	mod_timer(&toneport->timer, jiffies + TONEPORT_PCM_DELAY * HZ);
@@ -388,7 +400,7 @@ static void line6_toneport_disconnect(struct usb_line6 *line6)
 
 	del_timer_sync(&toneport->timer);
 
-	if (toneport_has_led(toneport->type))
+	if (toneport_has_led(toneport))
 		toneport_remove_leds(toneport);
 }
 
@@ -421,26 +433,19 @@ static int toneport_init(struct usb_line6 *line6,
 		return err;
 
 	/* register source select control: */
-	switch (toneport->type) {
-	case LINE6_TONEPORT_UX1:
-	case LINE6_TONEPORT_UX2:
-	case LINE6_PODSTUDIO_UX1:
-	case LINE6_PODSTUDIO_UX2:
+	if (toneport_has_source_select(toneport)) {
 		err =
 		    snd_ctl_add(line6->card,
 				snd_ctl_new1(&toneport_control_source,
 					     line6->line6pcm));
 		if (err < 0)
 			return err;
-
-	default:
-		break;
 	}
 
 	line6_read_serial_number(line6, &toneport->serial_number);
 	line6_read_data(line6, 0x80c2, &toneport->firmware_version, 1);
 
-	if (toneport_has_led(toneport->type)) {
+	if (toneport_has_led(toneport)) {
 		err = toneport_init_leds(toneport);
 		if (err < 0)
 			return err;
@@ -552,7 +557,7 @@ static const struct line6_properties toneport_properties_table[] = {
 static int toneport_probe(struct usb_interface *interface,
 			  const struct usb_device_id *id)
 {
-	return line6_probe(interface, id,
+	return line6_probe(interface, id, "Line6-TonePort",
 			   &toneport_properties_table[id->driver_info],
 			   toneport_init, sizeof(struct usb_line6_toneport));
 }

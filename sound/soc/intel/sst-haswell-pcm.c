@@ -36,6 +36,11 @@
 #define HSW_PCM_COUNT		6
 #define HSW_VOLUME_MAX		0x7FFFFFFF	/* 0dB */
 
+#define SST_OLD_POSITION(d, r, o) ((d) +		\
+			frames_to_bytes(r, o))
+#define SST_SAMPLES(r, x) (bytes_to_samples(r,	\
+			frames_to_bytes(r, (x))))
+
 /* simple volume table */
 static const u32 volume_map[] = {
 	HSW_VOLUME_MAX >> 30,
@@ -119,8 +124,9 @@ struct hsw_pcm_data {
 };
 
 enum hsw_pm_state {
-	HSW_PM_STATE_D3 = 0,
-	HSW_PM_STATE_D0 = 1,
+	HSW_PM_STATE_D0 = 0,
+	HSW_PM_STATE_RTD3 = 1,
+	HSW_PM_STATE_D3 = 2,
 };
 
 /* private data for the driver */
@@ -576,22 +582,33 @@ static int hsw_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
 	struct hsw_priv_data *pdata =
 		snd_soc_platform_get_drvdata(rtd->platform);
 	struct hsw_pcm_data *pcm_data;
+	struct sst_hsw_stream *sst_stream;
 	struct sst_hsw *hsw = pdata->hsw;
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	snd_pcm_uframes_t pos;
 	int dai;
 
 	dai = mod_map[rtd->cpu_dai->id].dai_id;
 	pcm_data = &pdata->pcm[dai][substream->stream];
+	sst_stream = pcm_data->stream;
 
 	switch (cmd) {
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		sst_hsw_stream_set_silence_start(hsw, sst_stream, false);
 		sst_hsw_stream_resume(hsw, pcm_data->stream, 0);
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		sst_hsw_stream_set_silence_start(hsw, sst_stream, false);
 		sst_hsw_stream_pause(hsw, pcm_data->stream, 0);
+		break;
+	case SNDRV_PCM_TRIGGER_DRAIN:
+		pos = runtime->control->appl_ptr % runtime->buffer_size;
+		sst_hsw_stream_set_old_position(hsw, pcm_data->stream, pos);
+		sst_hsw_stream_set_silence_start(hsw, sst_stream, true);
 		break;
 	default:
 		break;
@@ -606,12 +623,61 @@ static u32 hsw_notify_pointer(struct sst_hsw_stream *stream, void *data)
 	struct snd_pcm_substream *substream = pcm_data->substream;
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct hsw_priv_data *pdata =
+		snd_soc_platform_get_drvdata(rtd->platform);
+	struct sst_hsw *hsw = pdata->hsw;
 	u32 pos;
+	snd_pcm_uframes_t position = bytes_to_frames(runtime,
+		 sst_hsw_get_dsp_position(hsw, pcm_data->stream));
+	unsigned char *dma_area = runtime->dma_area;
+	snd_pcm_uframes_t dma_frames =
+		bytes_to_frames(runtime, runtime->dma_bytes);
+	snd_pcm_uframes_t old_position;
+	ssize_t samples;
 
 	pos = frames_to_bytes(runtime,
 		(runtime->control->appl_ptr % runtime->buffer_size));
 
 	dev_vdbg(rtd->dev, "PCM: App pointer %d bytes\n", pos);
+
+	/* SST fw don't know where to stop dma
+	 * So, SST driver need to clean the data which has been consumed
+	 */
+	if (dma_area == NULL || dma_frames <= 0
+		|| (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+		|| !sst_hsw_stream_get_silence_start(hsw, stream)) {
+		snd_pcm_period_elapsed(substream);
+		return pos;
+	}
+
+	old_position = sst_hsw_stream_get_old_position(hsw, stream);
+	if (position > old_position) {
+		if (position < dma_frames) {
+			samples = SST_SAMPLES(runtime, position - old_position);
+			snd_pcm_format_set_silence(runtime->format,
+				SST_OLD_POSITION(dma_area,
+					runtime, old_position),
+				samples);
+		} else
+			dev_err(rtd->dev, "PCM: position is wrong\n");
+	} else {
+		if (old_position < dma_frames) {
+			samples = SST_SAMPLES(runtime,
+				dma_frames - old_position);
+			snd_pcm_format_set_silence(runtime->format,
+				SST_OLD_POSITION(dma_area,
+					runtime, old_position),
+				samples);
+		} else
+			dev_err(rtd->dev, "PCM: dma_bytes is wrong\n");
+		if (position < dma_frames) {
+			samples = SST_SAMPLES(runtime, position);
+			snd_pcm_format_set_silence(runtime->format,
+				dma_area, samples);
+		} else
+			dev_err(rtd->dev, "PCM: position is wrong\n");
+	}
+	sst_hsw_stream_set_old_position(hsw, stream, position);
 
 	/* let alsa know we have play a period */
 	snd_pcm_period_elapsed(substream);
@@ -1035,12 +1101,12 @@ static int hsw_pcm_runtime_suspend(struct device *dev)
 	struct hsw_priv_data *pdata = dev_get_drvdata(dev);
 	struct sst_hsw *hsw = pdata->hsw;
 
-	if (pdata->pm_state == HSW_PM_STATE_D3)
+	if (pdata->pm_state >= HSW_PM_STATE_RTD3)
 		return 0;
 
 	sst_hsw_dsp_runtime_suspend(hsw);
 	sst_hsw_dsp_runtime_sleep(hsw);
-	pdata->pm_state = HSW_PM_STATE_D3;
+	pdata->pm_state = HSW_PM_STATE_RTD3;
 
 	return 0;
 }
@@ -1051,7 +1117,7 @@ static int hsw_pcm_runtime_resume(struct device *dev)
 	struct sst_hsw *hsw = pdata->hsw;
 	int ret;
 
-	if (pdata->pm_state == HSW_PM_STATE_D0)
+	if (pdata->pm_state != HSW_PM_STATE_RTD3)
 		return 0;
 
 	ret = sst_hsw_dsp_load(hsw);
@@ -1091,7 +1157,7 @@ static void hsw_pcm_complete(struct device *dev)
 	struct hsw_pcm_data *pcm_data;
 	int i, err;
 
-	if (pdata->pm_state == HSW_PM_STATE_D0)
+	if (pdata->pm_state != HSW_PM_STATE_D3)
 		return;
 
 	err = sst_hsw_dsp_load(hsw);
@@ -1139,41 +1205,42 @@ static int hsw_pcm_prepare(struct device *dev)
 
 	if (pdata->pm_state == HSW_PM_STATE_D3)
 		return 0;
-	/* suspend all active streams */
-	for (i = 0; i < ARRAY_SIZE(mod_map); i++) {
-		pcm_data = &pdata->pcm[mod_map[i].dai_id][mod_map[i].stream];
+	else if (pdata->pm_state == HSW_PM_STATE_D0) {
+		/* suspend all active streams */
+		for (i = 0; i < ARRAY_SIZE(mod_map); i++) {
+			pcm_data = &pdata->pcm[mod_map[i].dai_id][mod_map[i].stream];
 
-		if (!pcm_data->substream)
-			continue;
-		dev_dbg(dev, "suspending pcm %d\n", i);
-		snd_pcm_suspend_all(pcm_data->hsw_pcm);
+			if (!pcm_data->substream)
+				continue;
+			dev_dbg(dev, "suspending pcm %d\n", i);
+			snd_pcm_suspend_all(pcm_data->hsw_pcm);
 
-		/* We need to wait until the DSP FW stops the streams */
-		msleep(2);
+			/* We need to wait until the DSP FW stops the streams */
+			msleep(2);
+		}
+
+		/* preserve persistent memory */
+		for (i = 0; i < ARRAY_SIZE(mod_map); i++) {
+			pcm_data = &pdata->pcm[mod_map[i].dai_id][mod_map[i].stream];
+
+			if (!pcm_data->substream)
+				continue;
+
+			dev_dbg(dev, "saving context pcm %d\n", i);
+			err = sst_module_runtime_save(pcm_data->runtime,
+				&pcm_data->context);
+			if (err < 0)
+				dev_err(dev, "failed to save context for PCM %d\n", i);
+		}
+		/* enter D3 state and stall */
+		sst_hsw_dsp_runtime_suspend(hsw);
+		/* put the DSP to sleep */
+		sst_hsw_dsp_runtime_sleep(hsw);
 	}
 
 	snd_soc_suspend(pdata->soc_card->dev);
 	snd_soc_poweroff(pdata->soc_card->dev);
 
-	/* enter D3 state and stall */
-	sst_hsw_dsp_runtime_suspend(hsw);
-
-	/* preserve persistent memory */
-	for (i = 0; i < ARRAY_SIZE(mod_map); i++) {
-		pcm_data = &pdata->pcm[mod_map[i].dai_id][mod_map[i].stream];
-
-		if (!pcm_data->substream)
-			continue;
-
-		dev_dbg(dev, "saving context pcm %d\n", i);
-		err = sst_module_runtime_save(pcm_data->runtime,
-			&pcm_data->context);
-		if (err < 0)
-			dev_err(dev, "failed to save context for PCM %d\n", i);
-	}
-
-	/* put the DSP to sleep */
-	sst_hsw_dsp_runtime_sleep(hsw);
 	pdata->pm_state = HSW_PM_STATE_D3;
 
 	return 0;

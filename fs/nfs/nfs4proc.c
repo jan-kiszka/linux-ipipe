@@ -940,6 +940,31 @@ static bool nfs4_clear_cap_atomic_open_v1(struct nfs_server *server,
 	return true;
 }
 
+static u32
+nfs4_map_atomic_open_share(struct nfs_server *server,
+		fmode_t fmode, int openflags)
+{
+	u32 res = 0;
+
+	switch (fmode & (FMODE_READ | FMODE_WRITE)) {
+	case FMODE_READ:
+		res = NFS4_SHARE_ACCESS_READ;
+		break;
+	case FMODE_WRITE:
+		res = NFS4_SHARE_ACCESS_WRITE;
+		break;
+	case FMODE_READ|FMODE_WRITE:
+		res = NFS4_SHARE_ACCESS_BOTH;
+	}
+	if (!(server->caps & NFS_CAP_ATOMIC_OPEN_V1))
+		goto out;
+	/* Want no delegation if we're using O_DIRECT */
+	if (openflags & O_DIRECT)
+		res |= NFS4_SHARE_WANT_NO_DELEG;
+out:
+	return res;
+}
+
 static enum open_claim_type4
 nfs4_map_atomic_open_claim(struct nfs_server *server,
 		enum open_claim_type4 claim)
@@ -1002,6 +1027,8 @@ static struct nfs4_opendata *nfs4_opendata_alloc(struct dentry *dentry,
 	atomic_inc(&sp->so_count);
 	p->o_arg.open_flags = flags;
 	p->o_arg.fmode = fmode & (FMODE_READ|FMODE_WRITE);
+	p->o_arg.share_access = nfs4_map_atomic_open_share(server,
+			fmode, flags);
 	/* don't put an ACCESS op in OPEN compound if O_EXCL, because ACCESS
 	 * will return permission denied for all bits until close */
 	if (!(flags & O_EXCL)) {
@@ -2695,6 +2722,9 @@ static void nfs4_close_prepare(struct rpc_task *task, void *data)
 			goto out_wait;
 		    }
 	}
+	calldata->arg.share_access =
+		nfs4_map_atomic_open_share(NFS_SERVER(inode),
+				calldata->arg.fmode, 0);
 
 	nfs_fattr_init(calldata->res.fattr);
 	calldata->timestamp = jiffies;
@@ -5145,9 +5175,13 @@ static void nfs4_delegreturn_done(struct rpc_task *task, void *calldata)
 static void nfs4_delegreturn_release(void *calldata)
 {
 	struct nfs4_delegreturndata *data = calldata;
+	struct inode *inode = data->inode;
 
-	if (data->roc)
-		pnfs_roc_release(data->inode);
+	if (inode) {
+		if (data->roc)
+			pnfs_roc_release(inode);
+		nfs_iput_and_deactive(inode);
+	}
 	kfree(calldata);
 }
 
@@ -5204,9 +5238,9 @@ static int _nfs4_proc_delegreturn(struct inode *inode, struct rpc_cred *cred, co
 	nfs_fattr_init(data->res.fattr);
 	data->timestamp = jiffies;
 	data->rpc_status = 0;
-	data->inode = inode;
-	data->roc = list_empty(&NFS_I(inode)->open_files) ?
-		    pnfs_roc(inode) : false;
+	data->inode = nfs_igrab_and_active(inode);
+	if (data->inode)
+		data->roc = nfs4_roc(inode);
 
 	task_setup_data.callback_data = data;
 	msg.rpc_argp = &data->args;
@@ -7822,6 +7856,7 @@ static void nfs4_layoutreturn_release(void *calldata)
 	lo->plh_block_lgets--;
 	spin_unlock(&lo->plh_inode->i_lock);
 	pnfs_put_layout_hdr(lrp->args.layout);
+	nfs_iput_and_deactive(lrp->inode);
 	kfree(calldata);
 	dprintk("<-- %s\n", __func__);
 }
@@ -7846,23 +7881,25 @@ int nfs4_proc_layoutreturn(struct nfs4_layoutreturn *lrp, bool sync)
 		.rpc_message = &msg,
 		.callback_ops = &nfs4_layoutreturn_call_ops,
 		.callback_data = lrp,
-		.flags = RPC_TASK_ASYNC,
 	};
 	int status = 0;
 
 	dprintk("--> %s\n", __func__);
+	if (!sync) {
+		lrp->inode = nfs_igrab_and_active(lrp->args.inode);
+		if (!lrp->inode) {
+			nfs4_layoutreturn_release(lrp);
+			return -EAGAIN;
+		}
+		task_setup_data.flags |= RPC_TASK_ASYNC;
+	}
 	nfs4_init_sequence(&lrp->args.seq_args, &lrp->res.seq_res, 1);
 	task = rpc_run_task(&task_setup_data);
 	if (IS_ERR(task))
 		return PTR_ERR(task);
-	if (sync == false)
-		goto out;
-	status = nfs4_wait_for_completion_rpc_task(task);
-	if (status != 0)
-		goto out;
-	status = task->tk_status;
+	if (sync)
+		status = task->tk_status;
 	trace_nfs4_layoutreturn(lrp->args.inode, status);
-out:
 	dprintk("<-- %s status=%d\n", __func__, status);
 	rpc_put_task(task);
 	return status;
@@ -7955,6 +7992,7 @@ static void nfs4_layoutcommit_release(void *calldata)
 	nfs_post_op_update_inode_force_wcc(data->args.inode,
 					   data->res.fattr);
 	put_rpccred(data->cred);
+	nfs_iput_and_deactive(data->inode);
 	kfree(data);
 }
 
@@ -7979,7 +8017,6 @@ nfs4_proc_layoutcommit(struct nfs4_layoutcommit_data *data, bool sync)
 		.rpc_message = &msg,
 		.callback_ops = &nfs4_layoutcommit_ops,
 		.callback_data = data,
-		.flags = RPC_TASK_ASYNC,
 	};
 	struct rpc_task *task;
 	int status = 0;
@@ -7990,18 +8027,21 @@ nfs4_proc_layoutcommit(struct nfs4_layoutcommit_data *data, bool sync)
 		data->args.lastbytewritten,
 		data->args.inode->i_ino);
 
+	if (!sync) {
+		data->inode = nfs_igrab_and_active(data->args.inode);
+		if (data->inode == NULL) {
+			nfs4_layoutcommit_release(data);
+			return -EAGAIN;
+		}
+		task_setup_data.flags = RPC_TASK_ASYNC;
+	}
 	nfs4_init_sequence(&data->args.seq_args, &data->res.seq_res, 1);
 	task = rpc_run_task(&task_setup_data);
 	if (IS_ERR(task))
 		return PTR_ERR(task);
-	if (sync == false)
-		goto out;
-	status = nfs4_wait_for_completion_rpc_task(task);
-	if (status != 0)
-		goto out;
-	status = task->tk_status;
+	if (sync)
+		status = task->tk_status;
 	trace_nfs4_layoutcommit(data->args.inode, status);
-out:
 	dprintk("%s: status %d\n", __func__, status);
 	rpc_put_task(task);
 	return status;

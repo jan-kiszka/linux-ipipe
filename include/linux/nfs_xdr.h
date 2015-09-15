@@ -285,6 +285,7 @@ struct nfs4_layoutcommit_data {
 	struct nfs_fattr fattr;
 	struct list_head lseg_list;
 	struct rpc_cred *cred;
+	struct inode *inode;
 	struct nfs4_layoutcommit_args args;
 	struct nfs4_layoutcommit_res res;
 };
@@ -309,6 +310,7 @@ struct nfs4_layoutreturn {
 	struct nfs4_layoutreturn_res res;
 	struct rpc_cred *cred;
 	struct nfs_client *clp;
+	struct inode *inode;
 	int rpc_status;
 };
 
@@ -326,6 +328,7 @@ struct nfs_openargs {
 	struct nfs_seqid *	seqid;
 	int			open_flags;
 	fmode_t			fmode;
+	u32			share_access;
 	u32			access;
 	__u64                   clientid;
 	struct stateowner_id	id;
@@ -393,6 +396,7 @@ struct nfs_closeargs {
 	nfs4_stateid 		stateid;
 	struct nfs_seqid *	seqid;
 	fmode_t			fmode;
+	u32			share_access;
 	const u32 *		bitmask;
 };
 

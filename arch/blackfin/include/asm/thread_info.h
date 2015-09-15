@@ -44,7 +44,6 @@ struct thread_info {
 	int cpu;		/* cpu we're on */
 	int preempt_count;	/* 0 => preemptable, <0 => BUG */
 	mm_segment_t addr_limit;	/* address limit */
-	struct restart_block restart_block;
 #ifdef CONFIG_IPIPE
 	unsigned long ipipe_flags;
 #endif
@@ -64,9 +63,6 @@ struct thread_info {
 	.flags		= 0,			\
 	.cpu		= 0,			\
 	.preempt_count	= INIT_PREEMPT_COUNT,	\
-	.restart_block	= {			\
-		.fn = do_no_restart_syscall,	\
-	},					\
 }
 #define init_thread_info	(init_thread_union.thread_info)
 #define init_stack		(init_thread_union.stack)

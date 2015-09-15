@@ -63,7 +63,6 @@ void setbat(int index, unsigned long virt, phys_addr_t phys,
 #endif /* HAVE_BATS */
 
 #ifdef HAVE_TLBCAM
-extern unsigned int tlbcam_index;
 extern phys_addr_t v_mapped_by_tlbcam(unsigned long va);
 extern unsigned long p_mapped_by_tlbcam(phys_addr_t pa);
 #else /* !HAVE_TLBCAM */
@@ -147,7 +146,7 @@ void __iomem *
 ioremap_prot(phys_addr_t addr, unsigned long size, unsigned long flags)
 {
 	/* writeable implies dirty for kernel addresses */
-	if (flags & _PAGE_RW)
+	if ((flags & (_PAGE_RW | _PAGE_RO)) != _PAGE_RO)
 		flags |= _PAGE_DIRTY | _PAGE_HWWRITE;
 
 	/* we don't want to let _PAGE_USER and _PAGE_EXEC leak out */

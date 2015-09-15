@@ -106,7 +106,14 @@ extern u32 native_safe_apic_wait_icr_idle(void);
 extern void native_apic_icr_write(u32 low, u32 id);
 extern u64 native_apic_icr_read(void);
 
-extern int x2apic_mode;
+static inline bool apic_is_x2apic_enabled(void)
+{
+	u64 msr;
+
+	if (rdmsrl_safe(MSR_IA32_APICBASE, &msr))
+		return false;
+	return msr & X2APIC_ENABLE;
+}
 
 #ifdef CONFIG_X86_X2APIC
 /*
@@ -169,48 +176,23 @@ static inline u64 native_x2apic_icr_read(void)
 	return val;
 }
 
+extern int x2apic_mode;
 extern int x2apic_phys;
-extern int x2apic_preenabled;
-extern void check_x2apic(void);
-extern void enable_x2apic(void);
+extern void __init check_x2apic(void);
+extern void x2apic_setup(void);
 static inline int x2apic_enabled(void)
 {
-	u64 msr;
-
-	if (!cpu_has_x2apic)
-		return 0;
-
-	rdmsrl(MSR_IA32_APICBASE, msr);
-	if (msr & X2APIC_ENABLE)
-		return 1;
-	return 0;
+	return cpu_has_x2apic && apic_is_x2apic_enabled();
 }
 
 #define x2apic_supported()	(cpu_has_x2apic)
-static inline void x2apic_force_phys(void)
-{
-	x2apic_phys = 1;
-}
 #else
-static inline void disable_x2apic(void)
-{
-}
-static inline void check_x2apic(void)
-{
-}
-static inline void enable_x2apic(void)
-{
-}
-static inline int x2apic_enabled(void)
-{
-	return 0;
-}
-static inline void x2apic_force_phys(void)
-{
-}
+static inline void check_x2apic(void) { }
+static inline void x2apic_setup(void) { }
+static inline int x2apic_enabled(void) { return 0; }
 
-#define	x2apic_preenabled 0
-#define	x2apic_supported()	0
+#define x2apic_mode		(0)
+#define	x2apic_supported()	(0)
 #endif
 
 extern void enable_IR_x2apic(void);

@@ -2012,8 +2012,8 @@ replay:
 	}
 
 	if (1) {
-		struct nlattr *attr[ops ? ops->maxtype + 1 : 0];
-		struct nlattr *slave_attr[m_ops ? m_ops->slave_maxtype + 1 : 0];
+		struct nlattr *attr[ops ? ops->maxtype + 1 : 1];
+		struct nlattr *slave_attr[m_ops ? m_ops->slave_maxtype + 1 : 1];
 		struct nlattr **data = NULL;
 		struct nlattr **slave_data = NULL;
 		struct net *dest_net, *link_net = NULL;
@@ -2122,6 +2122,10 @@ replay:
 		if (IS_ERR(dest_net))
 			return PTR_ERR(dest_net);
 
+		err = -EPERM;
+		if (!netlink_ns_capable(skb, dest_net->user_ns, CAP_NET_ADMIN))
+			goto out;
+
 		if (tb[IFLA_LINK_NETNSID]) {
 			int id = nla_get_s32(tb[IFLA_LINK_NETNSID]);
 
@@ -2130,6 +2134,9 @@ replay:
 				err =  -EINVAL;
 				goto out;
 			}
+			err = -EPERM;
+			if (!netlink_ns_capable(skb, link_net->user_ns, CAP_NET_ADMIN))
+				goto out;
 		}
 
 		dev = rtnl_create_link(link_net ? : dest_net, ifname,

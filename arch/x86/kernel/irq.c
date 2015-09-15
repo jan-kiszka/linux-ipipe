@@ -305,6 +305,7 @@ int check_irq_vectors_for_cpu_disable(void)
 			desc = irq_to_desc(irq);
 			if (!desc)
 				continue;
+
 			data = irq_desc_get_irq_data(desc);
 			cpumask_copy(&affinity_new, data->affinity);
 			cpu_clear(this_cpu, affinity_new);

@@ -227,12 +227,15 @@ static int gic_set_type(struct irq_data *d, unsigned int type)
 	void __iomem *base = gic_dist_base(d);
 	unsigned int gicirq = gic_irq(d);
 	unsigned long flags;
+	int ret;
 
 	/* Interrupt configuration for SGIs can't be changed */
 	if (gicirq < 16)
 		return -EINVAL;
 
-	if (type != IRQ_TYPE_LEVEL_HIGH && type != IRQ_TYPE_EDGE_RISING)
+	/* SPIs have restrictions on the supported types */
+	if (gicirq >= 32 && type != IRQ_TYPE_LEVEL_HIGH &&
+			    type != IRQ_TYPE_EDGE_RISING)
 		return -EINVAL;
 
 	raw_spin_lock_irqsave_cond(&irq_controller_lock, flags);
@@ -240,11 +243,11 @@ static int gic_set_type(struct irq_data *d, unsigned int type)
 	if (gic_arch_extn.irq_set_type)
 		gic_arch_extn.irq_set_type(d, type);
 
-	gic_configure_irq(gicirq, type, base, NULL);
+	ret = gic_configure_irq(gicirq, type, base, NULL);
 
 	raw_spin_unlock_irqrestore_cond(&irq_controller_lock, flags);
 
-	return 0;
+	return ret;
 }
 
 static int gic_retrigger(struct irq_data *d)

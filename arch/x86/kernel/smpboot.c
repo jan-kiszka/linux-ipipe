@@ -172,8 +172,7 @@ static void smp_callin(void)
 	 * CPU, first the APIC. (this is probably redundant on most
 	 * boards)
 	 */
-	setup_local_APIC();
-	end_local_APIC_setup();
+	apic_ap_setup();
 
 	/*
 	 * Need to setup vector mappings before we enable interrupts.
@@ -993,6 +992,8 @@ void arch_disable_smp_support(void)
  */
 static __init void disable_smp(void)
 {
+	pr_info("SMP disabled\n");
+
 	disable_ioapic_support();
 
 	init_cpu_present(cpumask_of(0));
@@ -1005,6 +1006,13 @@ static __init void disable_smp(void)
 	cpumask_set_cpu(0, cpu_sibling_mask(0));
 	cpumask_set_cpu(0, cpu_core_mask(0));
 }
+
+enum {
+	SMP_OK,
+	SMP_NO_CONFIG,
+	SMP_NO_APIC,
+	SMP_FORCE_UP,
+};
 
 /*
  * Various sanity checks.
@@ -1053,10 +1061,7 @@ static int __init smp_sanity_check(unsigned max_cpus)
 	if (!smp_found_config && !acpi_lapic) {
 		preempt_enable();
 		pr_notice("SMP motherboard not detected\n");
-		disable_smp();
-		if (APIC_init_uniprocessor())
-			pr_notice("Local APIC not detected. Using dummy APIC emulation.\n");
-		return -1;
+		return SMP_NO_CONFIG;
 	}
 
 	/*
@@ -1080,8 +1085,7 @@ static int __init smp_sanity_check(unsigned max_cpus)
 				boot_cpu_physical_apicid);
 			pr_err("... forcing use of dummy APIC emulation (tell your hw vendor)\n");
 		}
-		disable_ioapic_support();
-		return -1;
+		return SMP_NO_APIC;
 	}
 
 	verify_local_APIC();
@@ -1091,15 +1095,10 @@ static int __init smp_sanity_check(unsigned max_cpus)
 	 */
 	if (!max_cpus) {
 		pr_info("SMP mode deactivated\n");
-		disable_ioapic_support();
-
-		connect_bsp_APIC();
-		setup_local_APIC();
-		bsp_end_local_APIC_setup();
-		return -1;
+		return SMP_FORCE_UP;
 	}
 
-	return 0;
+	return SMP_OK;
 }
 
 static void __init smp_cpu_index_default(void)
@@ -1139,10 +1138,21 @@ void __init native_smp_prepare_cpus(unsigned int max_cpus)
 	}
 	set_cpu_sibling_map(0);
 
-	if (smp_sanity_check(max_cpus) < 0) {
-		pr_info("SMP disabled\n");
+	switch (smp_sanity_check(max_cpus)) {
+	case SMP_NO_CONFIG:
+		disable_smp();
+		if (APIC_init_uniprocessor())
+			pr_notice("Local APIC not detected. Using dummy APIC emulation.\n");
+		return;
+	case SMP_NO_APIC:
 		disable_smp();
 		return;
+	case SMP_FORCE_UP:
+		disable_smp();
+		apic_bsp_setup(false);
+		return;
+	case SMP_OK:
+		break;
 	}
 
 	default_setup_apic_routing();
@@ -1153,30 +1163,10 @@ void __init native_smp_prepare_cpus(unsigned int max_cpus)
 		/* Or can we switch back to PIC here? */
 	}
 
-	connect_bsp_APIC();
+	cpu0_logical_apicid = apic_bsp_setup(false);
 
-	/*
-	 * Switch from PIC to APIC mode.
-	 */
-	setup_local_APIC();
-
-	if (x2apic_mode)
-		cpu0_logical_apicid = apic_read(APIC_LDR);
-	else
-		cpu0_logical_apicid = GET_APIC_LOGICAL_ID(apic_read(APIC_LDR));
-
-	/* Enable IO APIC before setting up error vector */
-	enable_IO_APIC();
-
-	bsp_end_local_APIC_setup();
-	setup_IO_APIC();
-
-	/*
-	 * Set up local APIC timer on boot CPU.
-	 */
 	pr_info("CPU%d: ", 0);
 	print_cpu_info(&cpu_data(0));
-	x86_init.timers.setup_percpu_clockev();
 
 	if (is_uv_system())
 		uv_system_init();

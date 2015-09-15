@@ -7,6 +7,9 @@
  *
  * clock driver for Freescale QorIQ SoCs.
  */
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/clk-provider.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
@@ -56,7 +59,7 @@ static u8 cmux_get_parent(struct clk_hw *hw)
 	return clksel;
 }
 
-const struct clk_ops cmux_ops = {
+static const struct clk_ops cmux_ops = {
 	.get_parent = cmux_get_parent,
 	.set_parent = cmux_set_parent,
 };
@@ -85,20 +88,17 @@ static void __init core_mux_init(struct device_node *np)
 		pr_err("%s: get clock count error\n", np->name);
 		return;
 	}
-	parent_names = kzalloc((sizeof(char *) * count), GFP_KERNEL);
-	if (!parent_names) {
-		pr_err("%s: could not allocate parent_names\n", __func__);
+	parent_names = kcalloc(count, sizeof(char *), GFP_KERNEL);
+	if (!parent_names)
 		return;
-	}
 
 	for (i = 0; i < count; i++)
 		parent_names[i] = of_clk_get_parent_name(np, i);
 
-	cmux_clk = kzalloc(sizeof(struct cmux_clk), GFP_KERNEL);
-	if (!cmux_clk) {
-		pr_err("%s: could not allocate cmux_clk\n", __func__);
+	cmux_clk = kzalloc(sizeof(*cmux_clk), GFP_KERNEL);
+	if (!cmux_clk)
 		goto err_name;
-	}
+
 	cmux_clk->reg = of_iomap(np, 0);
 	if (!cmux_clk->reg) {
 		pr_err("%s: could not map register\n", __func__);
@@ -121,7 +121,7 @@ static void __init core_mux_init(struct device_node *np)
 		cmux_clk->flags = CLKSEL_ADJUST;
 
 	rc = of_property_read_string_index(np, "clock-output-names",
-			0, &clk_name);
+					   0, &clk_name);
 	if (rc) {
 		pr_err("%s: read clock names error\n", np->name);
 		goto err_clk;
@@ -143,7 +143,7 @@ static void __init core_mux_init(struct device_node *np)
 	rc = of_clk_add_provider(np, of_clk_src_simple_get, clk);
 	if (rc) {
 		pr_err("Could not register clock provider for node:%s\n",
-			 np->name);
+		       np->name);
 		goto err_clk;
 	}
 	goto err_name;
@@ -166,7 +166,7 @@ static void __init core_pll_init(struct device_node *np)
 
 	base = of_iomap(np, 0);
 	if (!base) {
-		pr_err("clk-qoriq: iomap error\n");
+		pr_err("iomap error\n");
 		return;
 	}
 
@@ -192,21 +192,17 @@ static void __init core_pll_init(struct device_node *np)
 		goto err_map;
 	}
 
-	subclks = kzalloc(sizeof(struct clk *) * count, GFP_KERNEL);
-	if (!subclks) {
-		pr_err("%s: could not allocate subclks\n", __func__);
+	subclks = kcalloc(count, sizeof(struct clk *), GFP_KERNEL);
+	if (!subclks)
 		goto err_map;
-	}
 
-	onecell_data = kzalloc(sizeof(struct clk_onecell_data), GFP_KERNEL);
-	if (!onecell_data) {
-		pr_err("%s: could not allocate onecell_data\n", __func__);
+	onecell_data = kmalloc(sizeof(*onecell_data), GFP_KERNEL);
+	if (!onecell_data)
 		goto err_clks;
-	}
 
 	for (i = 0; i < count; i++) {
 		rc = of_property_read_string_index(np, "clock-output-names",
-				i, &clk_name);
+						   i, &clk_name);
 		if (rc) {
 			pr_err("%s: could not get clock names\n", np->name);
 			goto err_cell;
@@ -238,7 +234,7 @@ static void __init core_pll_init(struct device_node *np)
 	rc = of_clk_add_provider(np, of_clk_src_onecell_get, onecell_data);
 	if (rc) {
 		pr_err("Could not register clk provider for node:%s\n",
-			 np->name);
+		       np->name);
 		goto err_cell;
 	}
 
@@ -260,7 +256,7 @@ static void __init sysclk_init(struct device_node *node)
 	u32 rate;
 
 	if (!np) {
-		pr_err("qoriq-clk: could not get parent node\n");
+		pr_err("could not get parent node\n");
 		return;
 	}
 
@@ -275,9 +271,92 @@ static void __init sysclk_init(struct device_node *node)
 	if (!IS_ERR(clk))
 		of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
+
+static void __init pltfrm_pll_init(struct device_node *np)
+{
+	void __iomem *base;
+	uint32_t mult;
+	const char *parent_name, *clk_name;
+	int i, _errno;
+	struct clk_onecell_data *cod;
+
+	base = of_iomap(np, 0);
+	if (!base) {
+		pr_err("%s(): %s: of_iomap() failed\n", __func__, np->name);
+		return;
+	}
+
+	/* Get the multiple of PLL */
+	mult = ioread32be(base);
+
+	iounmap(base);
+
+	/* Check if this PLL is disabled */
+	if (mult & PLL_KILL) {
+		pr_debug("%s(): %s: Disabled\n", __func__, np->name);
+		return;
+	}
+	mult = (mult & GENMASK(6, 1)) >> 1;
+
+	parent_name = of_clk_get_parent_name(np, 0);
+	if (!parent_name) {
+		pr_err("%s(): %s: of_clk_get_parent_name() failed\n",
+		       __func__, np->name);
+		return;
+	}
+
+	i = of_property_count_strings(np, "clock-output-names");
+	if (i < 0) {
+		pr_err("%s(): %s: of_property_count_strings(clock-output-names) = %d\n",
+		       __func__, np->name, i);
+		return;
+	}
+
+	cod = kmalloc(sizeof(*cod) + i * sizeof(struct clk *), GFP_KERNEL);
+	if (!cod)
+		return;
+	cod->clks = (struct clk **)(cod + 1);
+	cod->clk_num = i;
+
+	for (i = 0; i < cod->clk_num; i++) {
+		_errno = of_property_read_string_index(np, "clock-output-names",
+						       i, &clk_name);
+		if (_errno < 0) {
+			pr_err("%s(): %s: of_property_read_string_index(clock-output-names) = %d\n",
+			       __func__, np->name, _errno);
+			goto return_clk_unregister;
+		}
+
+		cod->clks[i] = clk_register_fixed_factor(NULL, clk_name,
+					       parent_name, 0, mult, 1 + i);
+		if (IS_ERR(cod->clks[i])) {
+			pr_err("%s(): %s: clk_register_fixed_factor(%s) = %ld\n",
+			       __func__, np->name,
+			       clk_name, PTR_ERR(cod->clks[i]));
+			goto return_clk_unregister;
+		}
+	}
+
+	_errno = of_clk_add_provider(np, of_clk_src_onecell_get, cod);
+	if (_errno < 0) {
+		pr_err("%s(): %s: of_clk_add_provider() = %d\n",
+		       __func__, np->name, _errno);
+		goto return_clk_unregister;
+	}
+
+	return;
+
+return_clk_unregister:
+	while (--i >= 0)
+		clk_unregister(cod->clks[i]);
+	kfree(cod);
+}
+
 CLK_OF_DECLARE(qoriq_sysclk_1, "fsl,qoriq-sysclk-1.0", sysclk_init);
 CLK_OF_DECLARE(qoriq_sysclk_2, "fsl,qoriq-sysclk-2.0", sysclk_init);
 CLK_OF_DECLARE(qoriq_core_pll_1, "fsl,qoriq-core-pll-1.0", core_pll_init);
 CLK_OF_DECLARE(qoriq_core_pll_2, "fsl,qoriq-core-pll-2.0", core_pll_init);
 CLK_OF_DECLARE(qoriq_core_mux_1, "fsl,qoriq-core-mux-1.0", core_mux_init);
 CLK_OF_DECLARE(qoriq_core_mux_2, "fsl,qoriq-core-mux-2.0", core_mux_init);
+CLK_OF_DECLARE(qoriq_pltfrm_pll_1, "fsl,qoriq-platform-pll-1.0", pltfrm_pll_init);
+CLK_OF_DECLARE(qoriq_pltfrm_pll_2, "fsl,qoriq-platform-pll-2.0", pltfrm_pll_init);

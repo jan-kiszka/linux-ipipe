@@ -33,6 +33,7 @@
 #define CLK_GET_ACCURACY_NOCACHE BIT(8) /* do not use the cached clk accuracy */
 
 struct clk_hw;
+struct clk_core;
 struct dentry;
 
 /**
@@ -174,9 +175,12 @@ struct clk_ops {
 					unsigned long parent_rate);
 	long		(*round_rate)(struct clk_hw *hw, unsigned long rate,
 					unsigned long *parent_rate);
-	long		(*determine_rate)(struct clk_hw *hw, unsigned long rate,
-					unsigned long *best_parent_rate,
-					struct clk_hw **best_parent_hw);
+	long		(*determine_rate)(struct clk_hw *hw,
+					  unsigned long rate,
+					  unsigned long min_rate,
+					  unsigned long max_rate,
+					  unsigned long *best_parent_rate,
+					  struct clk_hw **best_parent_hw);
 	int		(*set_parent)(struct clk_hw *hw, u8 index);
 	u8		(*get_parent)(struct clk_hw *hw);
 	int		(*set_rate)(struct clk_hw *hw, unsigned long rate,
@@ -216,13 +220,17 @@ struct clk_init_data {
  * clk_foo and then referenced by the struct clk instance that uses struct
  * clk_foo's clk_ops
  *
- * @clk: pointer to the struct clk instance that points back to this struct
- * clk_hw instance
+ * @core: pointer to the struct clk_core instance that points back to this
+ * struct clk_hw instance
+ *
+ * @clk: pointer to the per-user struct clk instance that can be used to call
+ * into the clk API
  *
  * @init: pointer to struct clk_init_data that contains the init data shared
  * with the common clock framework.
  */
 struct clk_hw {
+	struct clk_core *core;
 	struct clk *clk;
 	const struct clk_init_data *init;
 };
@@ -568,18 +576,29 @@ bool __clk_is_prepared(struct clk *clk);
 bool __clk_is_enabled(struct clk *clk);
 struct clk *__clk_lookup(const char *name);
 long __clk_mux_determine_rate(struct clk_hw *hw, unsigned long rate,
+			      unsigned long min_rate,
+			      unsigned long max_rate,
 			      unsigned long *best_parent_rate,
 			      struct clk_hw **best_parent_p);
+unsigned long __clk_determine_rate(struct clk_hw *core,
+				   unsigned long rate,
+				   unsigned long min_rate,
+				   unsigned long max_rate);
 long __clk_mux_determine_rate_closest(struct clk_hw *hw, unsigned long rate,
+			      unsigned long min_rate,
+			      unsigned long max_rate,
 			      unsigned long *best_parent_rate,
 			      struct clk_hw **best_parent_p);
+
+static inline void __clk_hw_set_clk(struct clk_hw *dst, struct clk_hw *src)
+{
+	dst->clk = src->clk;
+	dst->core = src->core;
+}
 
 /*
  * FIXME clock api without lock protection
  */
-int __clk_prepare(struct clk *clk);
-void __clk_unprepare(struct clk *clk);
-void __clk_reparent(struct clk *clk, struct clk *new_parent);
 unsigned long __clk_round_rate(struct clk *clk, unsigned long rate);
 
 struct of_device_id;

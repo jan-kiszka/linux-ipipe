@@ -55,6 +55,7 @@
 #include <linux/delay.h>
 #include <linux/irq_work.h>
 #include <linux/ipipe_tickdev.h>
+#include <linux/clk-provider.h>
 #include <asm/trace.h>
 
 #include <asm/io.h>
@@ -1045,6 +1046,10 @@ void __init time_init(void)
 
 	init_decrementer_clockevent();
 	tick_setup_hrtimer_broadcast();
+
+#ifdef CONFIG_COMMON_CLK
+	of_clk_init(NULL);
+#endif
 }
 
 

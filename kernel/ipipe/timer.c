@@ -473,7 +473,7 @@ unsigned ipipe_timer_ns2ticks(struct ipipe_timer *timer, unsigned ns)
  */
 void ipipe_update_hostrt(struct timekeeper *tk)
 {
-	struct tk_read_base *tkr = &tk->tkr;
+	struct tk_read_base *tkr = &tk->tkr_mono;
 	struct clocksource *clock = tkr->clock;
 	struct ipipe_hostrt_data data;
 	struct timespec xt;

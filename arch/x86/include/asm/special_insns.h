@@ -5,6 +5,7 @@
 #ifdef __KERNEL__
 
 #include <asm/percpu.h>
+#include <asm/nops.h>
 
 DECLARE_PER_CPU(unsigned long, __ipipe_cr2);
 
@@ -209,6 +210,14 @@ static inline void clflushopt(volatile void *__p)
 		       ".byte 0x66; clflush %P0",
 		       X86_FEATURE_CLFLUSHOPT,
 		       "+m" (*(volatile char __force *)__p));
+}
+
+static inline void pcommit_sfence(void)
+{
+	alternative(ASM_NOP7,
+		    ".byte 0x66, 0x0f, 0xae, 0xf8\n\t" /* pcommit */
+		    "sfence",
+		    X86_FEATURE_PCOMMIT);
 }
 
 #define nop() asm volatile ("nop")

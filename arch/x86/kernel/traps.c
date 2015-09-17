@@ -983,10 +983,18 @@ void __init early_trap_init(void)
 	__set_intr_gate(X86_TRAP_DB, debug);
 	set_system_intr_gate(X86_TRAP_BP, &int3);
 #else
-	set_intr_gate_ist(X86_TRAP_DB, &debug, DEBUG_STACK);
+	/*
+	 * Don't set ist to DEBUG_STACK as it doesn't work until TSS is
+	 * ready in cpu_init() <-- trap_init(). Before trap_init(), CPU
+	 * runs at ring 0 so it is impossible to hit an invalid stack.
+	 * Using the original stack works well enough at this early
+	 * stage. DEBUG_STACK will be equipped after cpu_init() in
+	 * trap_init().
+	 */
+	set_intr_gate_ist(X86_TRAP_DB, &debug, 0);
 	/* int3 can be called from all */
-	set_system_intr_gate_ist(X86_TRAP_BP, &int3, DEBUG_STACK);
-#endif
+	set_system_intr_gate_ist(X86_TRAP_BP, &int3, 0);
+#endif /* CONFIG_IPIPE */
 #ifdef CONFIG_X86_32
 	set_intr_gate(X86_TRAP_PF, page_fault);
 #endif
@@ -1064,6 +1072,16 @@ void __init trap_init(void)
 	 */
 	cpu_init();
 
+#ifndef CONFIG_IPIPE
+	/*
+	 * X86_TRAP_DB and X86_TRAP_BP have been set
+	 * in early_trap_init(). However, DEBUG_STACK works only after
+	 * cpu_init() loads TSS. See comments in early_trap_init().
+	 */
+	set_intr_gate_ist(X86_TRAP_DB, &debug, DEBUG_STACK);
+	/* int3 can be called from all */
+	set_system_intr_gate_ist(X86_TRAP_BP, &int3, DEBUG_STACK);
+#endif /* ! CONFIG_IPIPE */
 	x86_init.irqs.trap_init();
 
 #ifdef CONFIG_X86_64

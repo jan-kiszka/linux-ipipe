@@ -1088,8 +1088,6 @@ static int __init smp_sanity_check(unsigned max_cpus)
 		return SMP_NO_APIC;
 	}
 
-	verify_local_APIC();
-
 	/*
 	 * If SMP should be disabled, then really disable it!
 	 */

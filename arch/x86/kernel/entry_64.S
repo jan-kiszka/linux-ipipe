@@ -822,10 +822,12 @@ END(interrupt)
 	 */
 	.p2align CONFIG_X86_L1_CACHE_SHIFT
 common_interrupt:
-#ifdef CONFIG_IPIPE
 	XCPT_FRAME
 	ASM_CLAC
 	addq $-0x80,(%rsp)		/* Adjust vector to [-256,-1] range */
+#ifndef CONFIG_IPIPE
+	interrupt do_IRQ
+#else /* CONFIG_IPIPE */
 	interrupt __ipipe_handle_irq
 	testl %eax, %eax
 	jnz ret_from_intr
@@ -837,12 +839,7 @@ common_interrupt:
 	testl $3,CS-ARGOFFSET(%rsp)
 	jz restore_args
 	jmp retint_swapgs_notrace
-#else /* !CONFIG_IPIPE */
-	XCPT_FRAME
-	ASM_CLAC
-	addq $-0x80,(%rsp)		/* Adjust vector to [-256,-1] range */
-	interrupt do_IRQ
-#endif /* !CONFIG_IPIPE */
+#endif /* CONFIG_IPIPE */
 	/* 0(%rsp): old_rsp-ARGOFFSET */
 ret_from_intr:
 	DISABLE_INTERRUPTS(CLBR_NONE)

@@ -1247,7 +1247,7 @@ ENTRY(\sym)
 	xorl %eax,%eax 	/* force paranoid_exit to propagate the exception */
 	.else
 	testl %eax, %eax
-	jz 1f
+	jz 2f
 	movl %ebx,%eax	/* %ebx: no swapgs flag */
 	RESTORE_REST
 	DISABLE_INTERRUPTS(CLBR_NONE)
@@ -1255,7 +1255,7 @@ ENTRY(\sym)
 	jne retint_noswapgs
 	jmp retint_swapgs_notrace
 	.endif
-1:
+2:
 #endif
 
 	.if \shift_ist != -1
@@ -1526,7 +1526,6 @@ ENTRY(paranoid_exit)
 	DEFAULT_FRAME
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF_DEBUG
-paranoid_notrace:
 	testl %ebx,%ebx				/* swapgs needed? */
 	jnz paranoid_restore
 	TRACE_IRQS_IRETQ 0

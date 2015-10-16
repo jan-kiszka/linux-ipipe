@@ -488,12 +488,7 @@ tracesys_phase2:
 	 */
 	LOAD_ARGS ARGOFFSET, 1
 	RESTORE_REST
-#if __SYSCALL_MASK == ~0
-	cmpq $__NR_syscall_max,%rax
-#else
-	andl $__SYSCALL_MASK,%eax
-	cmpl $__NR_syscall_max,%eax
-#endif
+	test_syscall_nr ax
 	ja   int_ret_from_sys_call	/* RAX(%rsp) is already set */
 	movq %r10,%rcx	/* fixup for C */
 	call *sys_call_table(,%rax,8)

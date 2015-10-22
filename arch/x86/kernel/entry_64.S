@@ -828,9 +828,9 @@ common_interrupt:
 	jnz ret_from_intr
 	decl PER_CPU_VAR(irq_count)
 	popq %rsi
-	leaq 16(%rsi), %rsp
+	leaq ARGOFFSET-RBP(%rsi), %rsp
 	CFI_DEF_CFA_REGISTER	rsp
-	CFI_ADJUST_CFA_OFFSET	-16
+	CFI_ADJUST_CFA_OFFSET	RBP-ARGOFFSET
 	testl $3,CS-ARGOFFSET(%rsp)
 	jz restore_args
 	jmp retint_swapgs_notrace
@@ -1069,9 +1069,9 @@ ENTRY(\sym)
 	jnz ret_from_intr
 	decl PER_CPU_VAR(irq_count)
 	popq %rsi
-	leaq 16(%rsi), %rsp
+	leaq ARGOFFSET-RBP(%rsi), %rsp
 	CFI_DEF_CFA_REGISTER	rsp
-	CFI_ADJUST_CFA_OFFSET	-16
+	CFI_ADJUST_CFA_OFFSET	RBP-ARGOFFSET
 	testl $3,CS-ARGOFFSET(%rsp)
 	jz restore_args
 	jmp retint_swapgs_notrace

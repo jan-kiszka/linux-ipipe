@@ -415,7 +415,7 @@ root_syscall:
 	movq R10-ARGOFFSET(%rsp),%r10
 	movq R9-ARGOFFSET(%rsp),%r9
 	movq R8-ARGOFFSET(%rsp),%r8
-#endif /* !CONFIG_IPIPE */
+#endif /* CONFIG_IPIPE */
 	testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags+THREAD_INFO(%rsp,RIP-ARGOFFSET)
 	jnz tracesys
 system_call_fastpath:

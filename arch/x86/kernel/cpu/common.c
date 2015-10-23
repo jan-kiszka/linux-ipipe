@@ -976,15 +976,16 @@ void enable_sep_cpu(void)
 		goto out;
 
 	/*
-	 * The struct::SS1 and tss_struct::SP1 fields are not used by the hardware,
-	 * we cache the SYSENTER CS and ESP values there for easy access:
+	 * We cache MSR_IA32_SYSENTER_CS's value in the TSS's ss1 field --
+	 * see the big comment in struct x86_hw_tss's definition.
 	 */
 
 	tss->x86_tss.ss1 = __KERNEL_CS;
 	wrmsr(MSR_IA32_SYSENTER_CS, tss->x86_tss.ss1, 0);
 
-	tss->x86_tss.sp1 = (unsigned long)tss + offsetofend(struct tss_struct, SYSENTER_stack);
-	wrmsr(MSR_IA32_SYSENTER_ESP, tss->x86_tss.sp1, 0);
+	wrmsr(MSR_IA32_SYSENTER_ESP,
+	      (unsigned long)tss + offsetofend(struct tss_struct, SYSENTER_stack),
+	      0);
 
 	wrmsr(MSR_IA32_SYSENTER_EIP, (unsigned long)ia32_sysenter_target, 0);
 
@@ -1173,15 +1174,17 @@ void syscall_init(void)
 #ifdef CONFIG_IA32_EMULATION
 	wrmsrl(MSR_CSTAR, ia32_cstar_target);
 	/*
-	 * Always load these, in case some future 64-bit CPU supports
-	 * SYSENTER from compat mode too:
+	 * This only works on Intel CPUs.
+	 * On AMD CPUs these MSRs are 32-bit, CPU truncates MSR_IA32_SYSENTER_EIP.
+	 * This does not cause SYSENTER to jump to the wrong location, because
+	 * AMD doesn't allow SYSENTER in long mode (either 32- or 64-bit).
 	 */
 	wrmsrl_safe(MSR_IA32_SYSENTER_CS, (u64)__KERNEL_CS);
 	wrmsrl_safe(MSR_IA32_SYSENTER_ESP, 0ULL);
 	wrmsrl_safe(MSR_IA32_SYSENTER_EIP, (u64)ia32_sysenter_target);
 #else
 	wrmsrl(MSR_CSTAR, ignore_sysret);
-	wrmsrl_safe(MSR_IA32_SYSENTER_CS, 0);
+	wrmsrl_safe(MSR_IA32_SYSENTER_CS, (u64)GDT_ENTRY_INVALID_SEG);
 	wrmsrl_safe(MSR_IA32_SYSENTER_ESP, 0ULL);
 	wrmsrl_safe(MSR_IA32_SYSENTER_EIP, 0ULL);
 #endif

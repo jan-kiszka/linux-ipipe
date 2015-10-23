@@ -198,10 +198,6 @@ static inline notrace unsigned long arch_local_irq_save(void)
 #define USERGS_SYSRET32				\
 	swapgs;					\
 	sysretl
-#define ENABLE_INTERRUPTS_SYSEXIT32		\
-	swapgs;					\
-	sti;					\
-	sysexit
 
 #else
 #define INTERRUPT_RETURN		iret
@@ -341,21 +337,28 @@ static inline unsigned long hard_local_save_flags(void)
 #define hard_smp_local_irq_restore(flags)	do { (void)(flags); } while(0)
 #endif /* CONFIG_SMP */
 
-#else
+#endif /* !__ASSEMBLY__ */
 
-#ifdef CONFIG_X86_64
-#define ARCH_LOCKDEP_SYS_EXIT		call lockdep_sys_exit_thunk
-#define ARCH_LOCKDEP_SYS_EXIT_IRQ	\
+#ifdef __ASSEMBLY__
+#ifdef CONFIG_TRACE_IRQFLAGS
+#  define TRACE_IRQS_ON		call trace_hardirqs_on_thunk;
+#  define TRACE_IRQS_OFF	call trace_hardirqs_off_thunk;
+#else
+#  define TRACE_IRQS_ON
+#  define TRACE_IRQS_OFF
+#endif
+#ifdef CONFIG_DEBUG_LOCK_ALLOC
+#  ifdef CONFIG_X86_64
+#    define LOCKDEP_SYS_EXIT	call lockdep_sys_exit_thunk
+#    define LOCKDEP_SYS_EXIT_IRQ \
 	TRACE_IRQS_ON; \
 	sti; \
-	SAVE_EXTRA_REGS; \
-	LOCKDEP_SYS_EXIT; \
-	RESTORE_EXTRA_REGS; \
+	call lockdep_sys_exit_thunk; \
 	cli; \
 	TRACE_IRQS_OFF;
 
-#else
-#define ARCH_LOCKDEP_SYS_EXIT			\
+#  else
+#    define LOCKDEP_SYS_EXIT			\
 	pushl %eax;				\
 	pushl %ecx;				\
 	pushl %edx;				\
@@ -367,23 +370,12 @@ static inline unsigned long hard_local_save_flags(void)
 	popl %ecx;				\
 	popl %eax;
 
-#define ARCH_LOCKDEP_SYS_EXIT_IRQ
-#endif
-
-#ifdef CONFIG_TRACE_IRQFLAGS
-#  define TRACE_IRQS_ON		call trace_hardirqs_on_thunk;
-#  define TRACE_IRQS_OFF	call trace_hardirqs_off_thunk;
+#    define LOCKDEP_SYS_EXIT_IRQ
+#  endif
 #else
-#  define TRACE_IRQS_ON
-#  define TRACE_IRQS_OFF
-#endif
-#ifdef CONFIG_DEBUG_LOCK_ALLOC
-#  define LOCKDEP_SYS_EXIT	ARCH_LOCKDEP_SYS_EXIT
-#  define LOCKDEP_SYS_EXIT_IRQ	ARCH_LOCKDEP_SYS_EXIT_IRQ
-# else
 #  define LOCKDEP_SYS_EXIT
 #  define LOCKDEP_SYS_EXIT_IRQ
-# endif
+#endif
 
 #endif /* __ASSEMBLY__ */
 #endif

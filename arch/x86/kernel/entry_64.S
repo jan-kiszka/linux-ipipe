@@ -74,10 +74,6 @@
 	.section .entry.text, "ax"
 
 
-#ifndef CONFIG_PREEMPT
-#define retint_kernel retint_restore_args
-#endif
-
 #ifdef CONFIG_PARAVIRT
 ENTRY(native_usergs_sysret64)
 	swapgs
@@ -266,6 +262,7 @@ GLOBAL(system_call_after_swapgs)
 	pushq_cfi_reg	r10			/* pt_regs->r10 */
 	pushq_cfi_reg	r11			/* pt_regs->r11 */
 	sub	$(6*8),%rsp /* pt_regs->bp,bx,r12-15 not saved */
+	CFI_ADJUST_CFA_OFFSET 6*8
 #ifdef CONFIG_IPIPE
 #ifndef CONFIG_IPIPE_LEGACY
 	test_syscall_nr ax
@@ -285,7 +282,7 @@ GLOBAL(system_call_after_swapgs)
 	jmp pipeline_leave
 root_fastexit:
 	call __ipipe_root_sync
-	jmp ret_from_sys_call
+	jmp 1f
 no_fastcall:
 	/* fastcall handler not implemented */
 	movq ORIG_RAX(%rsp),%rax
@@ -306,7 +303,7 @@ pipeline_leave:
 	jmp sysret_fastexit
 root_domain:
 	testl %eax, %eax
-	jnz ret_from_sys_call
+	jnz 1f
 	movq ORIG_RAX(%rsp),%rax
 root_syscall:
 	/* Reload all the syscall registers. */
@@ -317,19 +314,22 @@ root_syscall:
 	jnz tracesys
 system_call_fastpath:
 	test_syscall_nr ax
-	ja ret_from_sys_call  /* and return regs->ax */
+	ja	1f	/* return -ENOSYS (already in pt_regs->ax) */
 	movq %r10,%rcx
-	call *sys_call_table(,%rax,8)  # XXX:	 rip relative
+	call *sys_call_table(,%rax,8)
 	movq %rax,RAX(%rsp)
-/*
- * Syscall return path ending with SYSRET (fast path)
- * Has incompletely filled pt_regs, iret frame is also incomplete.
- */
-ret_from_sys_call:
 
+1:
+/*
+ * Syscall return path ending with SYSRET (fast path).
+ * Has incompletely filled pt_regs.
+ */
 	LOCKDEP_SYS_EXIT
+	/*
+	 * We do not frame this tiny irq-off block with TRACE_IRQS_OFF/ON,
+	 * it is too small to ever cause noticeable irq latency.
+	 */
 	DISABLE_INTERRUPTS(CLBR_NONE)
-	TRACE_IRQS_OFF
 
 	/*
 	 * We must check ti flags with interrupts (or at least preemption)
@@ -343,11 +343,8 @@ ret_from_sys_call:
 	jnz int_ret_from_sys_call_irqs_off	/* Go to the slow path */
 
 	CFI_REMEMBER_STATE
-	/*
-	 * sysretq will re-enable interrupts:
-	 */
-	TRACE_IRQS_ON
 sysret_fastexit:
+
 	RESTORE_C_REGS_EXCEPT_RCX_R11
 	movq	RIP(%rsp),%rcx
 	CFI_REGISTER	rip,rcx
@@ -358,6 +355,7 @@ sysret_fastexit:
 	 * 64bit SYSRET restores rip from rcx,
 	 * rflags from r11 (but RF and VM bits are forced to 0),
 	 * cs and ss are loaded from MSRs.
+	 * Restoration of rflags re-enables interrupts.
 	 */
 	USERGS_SYSRET64
 
@@ -366,7 +364,7 @@ sysret_fastexit:
 	/* Do syscall entry tracing */
 tracesys:
 	movq %rsp, %rdi
-	movq $AUDIT_ARCH_X86_64, %rsi
+	movl $AUDIT_ARCH_X86_64, %esi
 	call syscall_trace_enter_phase1
 	test %rax, %rax
 	jnz tracesys_phase2		/* if needed, run the slow path */
@@ -377,7 +375,7 @@ tracesys:
 tracesys_phase2:
 	SAVE_EXTRA_REGS
 	movq %rsp, %rdi
-	movq $AUDIT_ARCH_X86_64, %rsi
+	movl $AUDIT_ARCH_X86_64, %esi
 	movq %rax,%rdx
 	call syscall_trace_enter_phase2
 
@@ -388,11 +386,17 @@ tracesys_phase2:
 	 */
 	RESTORE_C_REGS_EXCEPT_RAX
 	RESTORE_EXTRA_REGS
-	test_syscall_nr ax
-	ja   int_ret_from_sys_call	/* RAX(%rsp) is already set */
+#if __SYSCALL_MASK == ~0
+	cmpq $__NR_syscall_max,%rax
+#else
+	andl $__SYSCALL_MASK,%eax
+	cmpl $__NR_syscall_max,%eax
+#endif
+	ja	1f	/* return -ENOSYS (already in pt_regs->ax) */
 	movq %r10,%rcx	/* fixup for C */
 	call *sys_call_table(,%rax,8)
 	movq %rax,RAX(%rsp)
+1:
 	/* Use IRET because user could have changed pt_regs->foo */
 
 /*
@@ -401,8 +405,8 @@ tracesys_phase2:
  */
 GLOBAL(int_ret_from_sys_call)
 	DISABLE_INTERRUPTS(CLBR_NONE)
+int_ret_from_sys_call_irqs_off: /* jumps come here from the irqs-off SYSRET path */
 	TRACE_IRQS_OFF
-int_ret_from_sys_call_irqs_off:
 	movl $_TIF_ALLWORK_MASK,%edi
 	/* edi:	mask to check */
 GLOBAL(int_with_check)
@@ -482,25 +486,27 @@ END(stub_\func)
 
 ENTRY(stub_execve)
 	CFI_STARTPROC
-	addq $8, %rsp
-	DEFAULT_FRAME 0
-	SAVE_EXTRA_REGS
-	call sys_execve
-	movq %rax,RAX(%rsp)
-	RESTORE_EXTRA_REGS
-	jmp int_ret_from_sys_call
+	DEFAULT_FRAME 0, 8
+	call	sys_execve
+return_from_execve:
+	testl	%eax, %eax
+	jz	1f
+	/* exec failed, can use fast SYSRET code path in this case */
+	ret
+1:
+	/* must use IRET code path (pt_regs->cs may have changed) */
+	addq	$8, %rsp
+	ZERO_EXTRA_REGS
+	movq	%rax,RAX(%rsp)
+	jmp	int_ret_from_sys_call
 	CFI_ENDPROC
 END(stub_execve)
 
 ENTRY(stub_execveat)
 	CFI_STARTPROC
-	addq $8, %rsp
-	DEFAULT_FRAME 0
-	SAVE_EXTRA_REGS
-	call sys_execveat
-	movq %rax,RAX(%rsp)
-	RESTORE_EXTRA_REGS
-	jmp int_ret_from_sys_call
+	DEFAULT_FRAME 0, 8
+	call	sys_execveat
+	jmp	return_from_execve
 	CFI_ENDPROC
 END(stub_execveat)
 
@@ -535,25 +541,17 @@ END(stub_x32_rt_sigreturn)
 
 ENTRY(stub_x32_execve)
 	CFI_STARTPROC
-	addq $8, %rsp
-	DEFAULT_FRAME 0
-	SAVE_EXTRA_REGS
-	call compat_sys_execve
-	movq %rax,RAX(%rsp)
-	RESTORE_EXTRA_REGS
-	jmp int_ret_from_sys_call
+	DEFAULT_FRAME 0, 8
+	call	compat_sys_execve
+	jmp	return_from_execve
 	CFI_ENDPROC
 END(stub_x32_execve)
 
 ENTRY(stub_x32_execveat)
 	CFI_STARTPROC
-	addq $8, %rsp
-	DEFAULT_FRAME 0
-	SAVE_EXTRA_REGS
-	call compat_sys_execveat
-	movq %rax,RAX(%rsp)
-	RESTORE_EXTRA_REGS
-	jmp int_ret_from_sys_call
+	DEFAULT_FRAME 0, 8
+	call	compat_sys_execveat
+	jmp	return_from_execve
 	CFI_ENDPROC
 END(stub_x32_execveat)
 
@@ -771,13 +769,12 @@ ENTRY(root_irq_trampoline)
 #endif
 
 exit_intr:
-	GET_THREAD_INFO(%rcx)
 	testl $3,CS(%rsp)
 	je retint_kernel
-
 	/* Interrupt came from user space */
+
+	GET_THREAD_INFO(%rcx)
 	/*
-	 * Has a correct top of stack.
 	 * %rcx: thread info. Interrupts off.
 	 */
 retint_with_reschedule:
@@ -867,7 +864,28 @@ opportunistic_sysret_failed:
 retint_noswapgs:
 	jmp restore_args
 
-retint_restore_args:	/* return to kernel space */
+/* Returning to kernel space */
+retint_kernel:
+#ifdef CONFIG_PREEMPT
+	/* Interrupts are off */
+	/* Check if we need preemption */
+	bt	$9,EFLAGS(%rsp)	/* interrupts were off? */
+	jnc	1f
+0:	cmpl	$0,PER_CPU_VAR(__preempt_count)
+	jnz	1f
+#ifdef CONFIG_IPIPE
+	/*
+	 * We may have preempted call_softirq before __do_softirq raised or
+	 * after it lowered the preemption counter.
+	 */
+	cmpl	$0,PER_CPU_VAR(irq_count)
+	jge	1f
+#endif
+	PREEMPT_SCHEDULE_IRQ
+	jmp	0b
+
+1:
+#endif
 	/*
 	 * The iretq could re-enable interrupts:
 	 */
@@ -956,25 +974,6 @@ retint_signal:
 	GET_THREAD_INFO(%rcx)
 	jmp retint_with_reschedule
 
-#ifdef CONFIG_PREEMPT
-	/* Returning to kernel space. Check if we need preemption */
-	/* rcx:	 threadinfo. interrupts off. */
-ENTRY(retint_kernel)
-	cmpl $0,PER_CPU_VAR(__preempt_count)
-	jnz  retint_restore_args
-	bt   $9,EFLAGS(%rsp)	/* interrupts off? */
-	jnc  retint_restore_args
-#ifdef CONFIG_IPIPE
-	/*
-	 * We may have preempted call_softirq before __do_softirq raised or
-	 * after it lowered the preemption counter.
-	 */
-	cmpl $0,PER_CPU_VAR(irq_count)
-	jge  retint_restore_args
-#endif
-	PREEMPT_SCHEDULE_IRQ
-	jmp exit_intr
-#endif
 	CFI_ENDPROC
 END(common_interrupt)
 
@@ -1551,19 +1550,7 @@ ENTRY(error_exit)
 	CFI_ENDPROC
 END(error_exit)
 
-/*
- * Test if a given stack is an NMI stack or not.
- */
-	.macro test_in_nmi reg stack nmi_ret normal_ret
-	cmpq %\reg, \stack
-	ja \normal_ret
-	subq $EXCEPTION_STKSZ, %\reg
-	cmpq %\reg, \stack
-	jb \normal_ret
-	jmp \nmi_ret
-	.endm
-
-	/* runs on exception stack */
+/* Runs on exception stack */
 ENTRY(nmi)
 	INTR_FRAME
 	PARAVIRT_ADJUST_EXCEPTION_FRAME
@@ -1599,7 +1586,7 @@ ENTRY(nmi)
 	 * NMI.
 	 */
 
-	/* Use %rdx as out temp variable throughout */
+	/* Use %rdx as our temp variable throughout */
 	pushq_cfi %rdx
 	CFI_REL_OFFSET rdx, 0
 
@@ -1624,8 +1611,18 @@ ENTRY(nmi)
 	 * We check the variable because the first NMI could be in a
 	 * breakpoint routine using a breakpoint stack.
 	 */
-	lea 6*8(%rsp), %rdx
-	test_in_nmi rdx, 4*8(%rsp), nested_nmi, first_nmi
+	lea	6*8(%rsp), %rdx
+	/* Compare the NMI stack (rdx) with the stack we came from (4*8(%rsp)) */
+	cmpq	%rdx, 4*8(%rsp)
+	/* If the stack pointer is above the NMI stack, this is a normal NMI */
+	ja	first_nmi
+	subq	$EXCEPTION_STKSZ, %rdx
+	cmpq	%rdx, 4*8(%rsp)
+	/* If it is below the NMI stack, it is a normal NMI */
+	jb	first_nmi
+	/* Ah, it is within the NMI stack, treat it as nested */
+	jmp	nested_nmi
+
 	CFI_REMEMBER_STATE
 
 nested_nmi:

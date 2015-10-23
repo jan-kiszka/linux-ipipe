@@ -142,35 +142,41 @@ ENTRY(ia32_sysenter_target)
 	CFI_SIGNAL_FRAME
 	CFI_DEF_CFA	rsp,0
 	CFI_REGISTER	rsp,rbp
+
+	/*
+	 * Interrupts are off on entry.
+	 * We do not frame this tiny irq-off block with TRACE_IRQS_OFF/ON,
+	 * it is too small to ever cause noticeable irq latency.
+	 */
 	SWAPGS_UNSAFE_STACK
 	movq	PER_CPU_VAR(cpu_tss + TSS_sp0), %rsp
-	/*
-	 * No need to follow this irqs on/off section: the syscall
-	 * disabled irqs, here we enable it straight after entry:
-	 */
 	ENABLE_INTERRUPTS(CLBR_NONE)
-	/* Construct iret frame (ss,rsp,rflags,cs,rip) */
- 	movl	%ebp,%ebp		/* zero extension */
-	pushq_cfi $__USER32_DS
-	/*CFI_REL_OFFSET ss,0*/
-	pushq_cfi %rbp
-	CFI_REL_OFFSET rsp,0
-	pushfq_cfi
-	/*CFI_REL_OFFSET rflags,0*/
-	movl	ASM_THREAD_INFO(TI_sysenter_return, %rsp, 3*8), %r10d
-	CFI_REGISTER rip,r10
-	pushq_cfi $__USER32_CS
-	/*CFI_REL_OFFSET cs,0*/
+
+	/* Zero-extending 32-bit regs, do not remove */
+	movl	%ebp, %ebp
 	movl	%eax, %eax
-	/* Store thread_info->sysenter_return in rip stack slot */
-	pushq_cfi %r10
-	CFI_REL_OFFSET rip,0
-	/* Store orig_ax */
-	pushq_cfi %rax
-	/* Construct the rest of "struct pt_regs" */
+
+	movl	ASM_THREAD_INFO(TI_sysenter_return, %rsp, 0), %r10d
+	CFI_REGISTER rip,r10
+
+	/* Construct struct pt_regs on stack */
+	pushq_cfi	$__USER32_DS		/* pt_regs->ss */
+	pushq_cfi	%rbp			/* pt_regs->sp */
+	CFI_REL_OFFSET	rsp,0
+	pushfq_cfi				/* pt_regs->flags */
+	pushq_cfi	$__USER32_CS		/* pt_regs->cs */
+	pushq_cfi	%r10 /* pt_regs->ip = thread_info->sysenter_return */
+	CFI_REL_OFFSET	rip,0
+	pushq_cfi_reg	rax			/* pt_regs->orig_ax */
+	pushq_cfi_reg	rdi			/* pt_regs->di */
+	pushq_cfi_reg	rsi			/* pt_regs->si */
+	pushq_cfi_reg	rdx			/* pt_regs->dx */
+	pushq_cfi_reg	rcx			/* pt_regs->cx */
+	pushq_cfi_reg	rax			/* pt_regs->ax */
 	cld
- 	ALLOC_PT_GPREGS_ON_STACK
-	SAVE_C_REGS_EXCEPT_R891011
+	sub	$(10*8),%rsp /* pt_regs->r8-11,bp,bx,r12-15 not saved */
+	CFI_ADJUST_CFA_OFFSET 10*8
+
 	/*
 	 * no need to do an access_ok check here because rbp has been
 	 * 32bit zero extended
@@ -212,28 +218,55 @@ sysexit_work:
 	testl	$_TIF_ALLWORK_MASK, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jnz	sysexit_audit
 sysexit_from_sys_call:
+	/*
+	 * NB: SYSEXIT is not obviously safe for 64-bit kernels -- an
+	 * NMI between STI and SYSEXIT has poorly specified behavior,
+	 * and and NMI followed by an IRQ with usergs is fatal.  So
+	 * we just pretend we're using SYSEXIT but we really use
+	 * SYSRETL instead.
+	 *
+	 * This code path is still called 'sysexit' because it pairs
+	 * with 'sysenter' and it uses the SYSENTER calling convention.
+	 */
 	andl    $~TS_COMPAT,ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
-	/* clear IF, that popfq doesn't enable interrupts early */
-	andl	$~0x200,EFLAGS(%rsp)
-	movl	RIP(%rsp),%edx		/* User %eip */
-	CFI_REGISTER rip,rdx
+	movl	RIP(%rsp),%ecx		/* User %eip */
+	CFI_REGISTER rip,rcx
 	RESTORE_RSI_RDI
-	/* pop everything except ss,rsp,rflags slots */
-	REMOVE_PT_GPREGS_FROM_STACK 3*8
+	xorl	%edx,%edx		/* avoid info leaks */
 	xorq	%r8,%r8
 	xorq	%r9,%r9
 	xorq	%r10,%r10
-	xorq	%r11,%r11
-	popfq_cfi
+	movl	EFLAGS(%rsp),%r11d	/* User eflags */
 	/*CFI_RESTORE rflags*/
-	popq_cfi %rcx				/* User %esp */
-	CFI_REGISTER rsp,rcx
 	TRACE_IRQS_ON
+
 	/*
-	 * 32bit SYSEXIT restores eip from edx, esp from ecx.
-	 * cs and ss are loaded from MSRs.
+	 * SYSRETL works even on Intel CPUs.  Use it in preference to SYSEXIT,
+	 * since it avoids a dicey window with interrupts enabled.
 	 */
-	ENABLE_INTERRUPTS_SYSEXIT32
+	movl	RSP(%rsp),%esp
+
+	/*
+	 * USERGS_SYSRET32 does:
+	 *  gsbase = user's gs base
+	 *  eip = ecx
+	 *  rflags = r11
+	 *  cs = __USER32_CS
+	 *  ss = __USER_DS
+	 *
+	 * The prologue set RIP(%rsp) to VDSO32_SYSENTER_RETURN, which does:
+	 *
+	 *  pop %ebp
+	 *  pop %edx
+	 *  pop %ecx
+	 *
+	 * Therefore, we invoke SYSRETL with EDX and R8-R10 zeroed to
+	 * avoid info leaks.  R11 ends up with VDSO32_SYSENTER_RETURN's
+	 * address (already known to user code), and R12-R15 are
+	 * callee-saved and therefore don't contain any interesting
+	 * kernel data.
+	 */
+	USERGS_SYSRET32
 
 	CFI_RESTORE_STATE
 
@@ -346,30 +379,39 @@ ENTRY(ia32_cstar_target)
 	CFI_DEF_CFA	rsp,0
 	CFI_REGISTER	rip,rcx
 	/*CFI_REGISTER	rflags,r11*/
+
+	/*
+	 * Interrupts are off on entry.
+	 * We do not frame this tiny irq-off block with TRACE_IRQS_OFF/ON,
+	 * it is too small to ever cause noticeable irq latency.
+	 */
 	SWAPGS_UNSAFE_STACK
 	movl	%esp,%r8d
 	CFI_REGISTER	rsp,r8
 	movq	PER_CPU_VAR(kernel_stack),%rsp
-	/*
-	 * No need to follow this irqs on/off section: the syscall
-	 * disabled irqs and here we enable it straight after entry:
-	 */
 	ENABLE_INTERRUPTS(CLBR_NONE)
-	ALLOC_PT_GPREGS_ON_STACK 6*8 /* 6*8: space for orig_ax and iret frame */
-	SAVE_C_REGS_EXCEPT_RCX_R891011
-	movl 	%eax,%eax	/* zero extension */
-	movq	%rax,ORIG_RAX(%rsp)
-	movq	%rcx,RIP(%rsp)
-	CFI_REL_OFFSET rip,RIP
-	movq	%rbp,RCX(%rsp) /* this lies slightly to ptrace */
+
+	/* Zero-extending 32-bit regs, do not remove */
+	movl	%eax,%eax
+
+	/* Construct struct pt_regs on stack */
+	pushq_cfi	$__USER32_DS		/* pt_regs->ss */
+	pushq_cfi	%r8			/* pt_regs->sp */
+	CFI_REL_OFFSET rsp,0
+	pushq_cfi	%r11			/* pt_regs->flags */
+	pushq_cfi	$__USER32_CS		/* pt_regs->cs */
+	pushq_cfi	%rcx			/* pt_regs->ip */
+	CFI_REL_OFFSET rip,0
+	pushq_cfi_reg	rax			/* pt_regs->orig_ax */
+	pushq_cfi_reg	rdi			/* pt_regs->di */
+	pushq_cfi_reg	rsi			/* pt_regs->si */
+	pushq_cfi_reg	rdx			/* pt_regs->dx */
+	pushq_cfi_reg	rbp			/* pt_regs->cx */
 	movl	%ebp,%ecx
-	movq	$__USER32_CS,CS(%rsp)
-	movq	$__USER32_DS,SS(%rsp)
-	movq	%r11,EFLAGS(%rsp)
-	/*CFI_REL_OFFSET rflags,EFLAGS*/
-	movq	%r8,RSP(%rsp)
-	CFI_REL_OFFSET rsp,RSP
-	/* iret stack frame is complete now */
+	pushq_cfi_reg	rax			/* pt_regs->ax */
+	sub	$(10*8),%rsp /* pt_regs->r8-11,bp,bx,r12-15 not saved */
+	CFI_ADJUST_CFA_OFFSET 10*8
+
 	/*
 	 * no need to do an access_ok check here because r8 has been
 	 * 32bit zero extended
@@ -483,26 +525,36 @@ ia32_badarg:
 ENTRY(ia32_syscall)
 	CFI_STARTPROC32	simple
 	CFI_SIGNAL_FRAME
-	CFI_DEF_CFA	rsp,SS+8-RIP
-	/*CFI_REL_OFFSET	ss,SS-RIP*/
-	CFI_REL_OFFSET	rsp,RSP-RIP
-	/*CFI_REL_OFFSET	rflags,EFLAGS-RIP*/
-	/*CFI_REL_OFFSET	cs,CS-RIP*/
-	CFI_REL_OFFSET	rip,RIP-RIP
+	CFI_DEF_CFA	rsp,5*8
+	/*CFI_REL_OFFSET	ss,4*8 */
+	CFI_REL_OFFSET	rsp,3*8
+	/*CFI_REL_OFFSET	rflags,2*8 */
+	/*CFI_REL_OFFSET	cs,1*8 */
+	CFI_REL_OFFSET	rip,0*8
+
+	/*
+	 * Interrupts are off on entry.
+	 * We do not frame this tiny irq-off block with TRACE_IRQS_OFF/ON,
+	 * it is too small to ever cause noticeable irq latency.
+	 */
 	PARAVIRT_ADJUST_EXCEPTION_FRAME
 	SWAPGS
-	/*
-	 * No need to follow this irqs on/off section: the syscall
-	 * disabled irqs and here we enable it straight after entry:
-	 */
 	ENABLE_INTERRUPTS(CLBR_NONE)
-	movl %eax,%eax
-	pushq_cfi %rax		/* store orig_ax */
+
+	/* Zero-extending 32-bit regs, do not remove */
+	movl	%eax,%eax
+
+	/* Construct struct pt_regs on stack (iret frame is already on stack) */
+	pushq_cfi_reg	rax			/* pt_regs->orig_ax */
+	pushq_cfi_reg	rdi			/* pt_regs->di */
+	pushq_cfi_reg	rsi			/* pt_regs->si */
+	pushq_cfi_reg	rdx			/* pt_regs->dx */
+	pushq_cfi_reg	rcx			/* pt_regs->cx */
+	pushq_cfi_reg	rax			/* pt_regs->ax */
 	cld
-	/* note the registers are not zero extended to the sf.
-	   this could be a problem. */
-	ALLOC_PT_GPREGS_ON_STACK
-	SAVE_C_REGS_EXCEPT_R891011
+	sub	$(10*8),%rsp /* pt_regs->r8-11,bp,bx,r12-15 not saved */
+	CFI_ADJUST_CFA_OFFSET 10*8
+
 	orl $TS_COMPAT, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	IPIPE_IA32_SYSCALL %rax fast_exit_syscall ia32_ret_from_sys_call
 	testl $_TIF_WORK_SYSCALL_ENTRY, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)

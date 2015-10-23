@@ -270,15 +270,15 @@ GLOBAL(system_call_after_swapgs)
 #ifndef CONFIG_IPIPE_LEGACY
 	test_syscall_nr ax
 	jb slow_path
-	testl $_TIP_HEAD,TI_ipipe+THREAD_INFO(%rsp,RIP)
+	testl $_TIP_HEAD,ASM_THREAD_INFO(TI_ipipe,%rsp,RIP)
 	jz slow_path
 	leaq (%rsp),%rdi
 	call ipipe_fastcall_hook
 	testl %eax, %eax
 	js no_fastcall
-	testl $_TIP_HEAD,TI_ipipe+THREAD_INFO(%rsp,RIP)
+	testl $_TIP_HEAD,ASM_THREAD_INFO(TI_ipipe,%rsp,RIP)
 	jz root_fastexit
-	testl $_TIP_MAYDAY,TI_ipipe+THREAD_INFO(%rsp,RIP)
+	testl $_TIP_MAYDAY,ASM_THREAD_INFO(TI_ipipe,%rsp,RIP)
 	jz pipeline_leave
 	leaq (%rsp),%rdi
 	call __ipipe_call_mayday
@@ -291,14 +291,14 @@ no_fastcall:
 	movq ORIG_RAX(%rsp),%rax
 slow_path:
 #endif /* !CONFIG_IPIPE_LEGACY */
-	testl $_TIP_NOTIFY,TI_ipipe+THREAD_INFO(%rsp,RIP)
+	testl $_TIP_NOTIFY,ASM_THREAD_INFO(TI_ipipe,%rsp,RIP)
 	jnz pipeline_syscall
 	test_syscall_nr ax
 	jb root_syscall
 pipeline_syscall:
 	leaq (%rsp),%rdi	# regs for handler
 	call __ipipe_notify_syscall
-	testl $_TIP_HEAD,TI_ipipe+THREAD_INFO(%rsp,RIP)
+	testl $_TIP_HEAD,ASM_THREAD_INFO(TI_ipipe,%rsp,RIP)
 	jz root_domain
 pipeline_leave:
 	DISABLE_INTERRUPTS(CLBR_NONE)
@@ -313,7 +313,7 @@ root_syscall:
 	RESTORE_C_REGS_EXCEPT_RAX
 #endif /* CONFIG_IPIPE */
 
-	testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl $_TIF_WORK_SYSCALL_ENTRY, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jnz tracesys
 system_call_fastpath:
 	test_syscall_nr ax
@@ -338,7 +338,7 @@ ret_from_sys_call:
 	 * flags (TIF_NOTIFY_RESUME, TIF_USER_RETURN_NOTIFY, etc) set is
 	 * very bad.
 	 */
-	testl $_TIF_ALLWORK_MASK,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl $_TIF_ALLWORK_MASK, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jnz int_ret_from_sys_call	/* Go the slow path */
 
 	CFI_REMEMBER_STATE

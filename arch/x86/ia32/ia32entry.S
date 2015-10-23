@@ -74,7 +74,7 @@
 
 	.macro IPIPE_IA32_SYSCALL nr fast_exit post_exit
 #ifdef CONFIG_IPIPE
-	testl $_TIP_NOTIFY,TI_ipipe+THREAD_INFO(%rsp,RIP)
+	testl $_TIP_NOTIFY,ASM_THREAD_INFO(TI_ipipe,%rsp,RIP)
 	jnz 1f
 	cmpq $(IA32_NR_syscalls),\nr
 	jb 2f
@@ -92,7 +92,7 @@
 	movq RAX(%rsp),%rax
 	addq $ORIG_RAX+8, %rsp
 	movq %rax,RAX(%rsp)
-	testl $_TIP_HEAD,TI_ipipe+THREAD_INFO(%rsp,RIP)
+	testl $_TIP_HEAD,ASM_THREAD_INFO(TI_ipipe,%rsp,RIP)
 	jnz \fast_exit
 	test %rdi,%rdi
 	jnz \post_exit
@@ -157,7 +157,7 @@ ENTRY(ia32_sysenter_target)
 	CFI_REL_OFFSET rsp,0
 	pushfq_cfi
 	/*CFI_REL_OFFSET rflags,0*/
-	movl	TI_sysenter_return+THREAD_INFO(%rsp,3*8),%r10d
+	movl	ASM_THREAD_INFO(TI_sysenter_return, %rsp, 3*8), %r10d
 	CFI_REGISTER rip,r10
 	pushq_cfi $__USER32_CS
 	/*CFI_REL_OFFSET cs,0*/
@@ -189,9 +189,9 @@ ENTRY(ia32_sysenter_target)
 	jnz sysenter_fix_flags
 sysenter_flags_fixed:
 
-	orl     $TS_COMPAT,TI_status+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	orl     $TS_COMPAT, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	IPIPE_IA32_SYSCALL %rax sysexit_from_sys_call sysexit_work
-	testl   $_TIF_WORK_SYSCALL_ENTRY,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl   $_TIF_WORK_SYSCALL_ENTRY, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	CFI_REMEMBER_STATE
 	jnz  sysenter_tracesys
 	cmpq	$(IA32_NR_syscalls-1),%rax
@@ -209,10 +209,10 @@ sysenter_dispatch:
 sysexit_work:
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
-	testl	$_TIF_ALLWORK_MASK,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl	$_TIF_ALLWORK_MASK, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jnz	sysexit_audit
 sysexit_from_sys_call:
-	andl    $~TS_COMPAT,TI_status+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	andl    $~TS_COMPAT,ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	/* clear IF, that popfq doesn't enable interrupts early */
 	andl	$~0x200,EFLAGS(%rsp)
 	movl	RIP(%rsp),%edx		/* User %eip */
@@ -257,7 +257,7 @@ sysexit_from_sys_call:
 	.endm
 
 	.macro auditsys_exit exit
-	testl $(_TIF_ALLWORK_MASK & ~_TIF_SYSCALL_AUDIT),TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl $(_TIF_ALLWORK_MASK & ~_TIF_SYSCALL_AUDIT), ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jnz ia32_ret_from_sys_call
 	TRACE_IRQS_ON
 	ENABLE_INTERRUPTS(CLBR_NONE)
@@ -272,7 +272,7 @@ sysexit_from_sys_call:
 	movl $(_TIF_ALLWORK_MASK & ~_TIF_SYSCALL_AUDIT),%edi
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
-	testl %edi,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl %edi, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jz \exit
 	CLEAR_RREGS
 	jmp int_with_check
@@ -294,7 +294,7 @@ sysenter_fix_flags:
 
 sysenter_tracesys:
 #ifdef CONFIG_AUDITSYSCALL
-	testl	$(_TIF_WORK_SYSCALL_ENTRY & ~_TIF_SYSCALL_AUDIT),TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl	$(_TIF_WORK_SYSCALL_ENTRY & ~_TIF_SYSCALL_AUDIT), ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jz	sysenter_auditsys
 #endif
 	SAVE_EXTRA_REGS
@@ -378,9 +378,9 @@ ENTRY(ia32_cstar_target)
 1:	movl	(%r8),%r9d
 	_ASM_EXTABLE(1b,ia32_badarg)
 	ASM_CLAC
-	orl     $TS_COMPAT,TI_status+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	orl     $TS_COMPAT, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	IPIPE_IA32_SYSCALL %rax sysretl_from_sys_call cstar_work
-	testl   $_TIF_WORK_SYSCALL_ENTRY,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl   $_TIF_WORK_SYSCALL_ENTRY, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	CFI_REMEMBER_STATE
 	jnz   cstar_tracesys
 	cmpq $IA32_NR_syscalls-1,%rax
@@ -398,10 +398,10 @@ cstar_dispatch:
 cstar_work:
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
-	testl $_TIF_ALLWORK_MASK,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl $_TIF_ALLWORK_MASK, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jnz sysretl_audit
 sysretl_from_sys_call:
-	andl $~TS_COMPAT,TI_status+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	andl $~TS_COMPAT, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	RESTORE_RSI_RDI_RDX
 	movl RIP(%rsp),%ecx
 	CFI_REGISTER rip,rcx
@@ -436,7 +436,7 @@ sysretl_audit:
 
 cstar_tracesys:
 #ifdef CONFIG_AUDITSYSCALL
-	testl $(_TIF_WORK_SYSCALL_ENTRY & ~_TIF_SYSCALL_AUDIT),TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl $(_TIF_WORK_SYSCALL_ENTRY & ~_TIF_SYSCALL_AUDIT), ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jz cstar_auditsys
 #endif
 	xchgl %r9d,%ebp
@@ -503,9 +503,9 @@ ENTRY(ia32_syscall)
 	   this could be a problem. */
 	ALLOC_PT_GPREGS_ON_STACK
 	SAVE_C_REGS_EXCEPT_R891011
-	orl $TS_COMPAT,TI_status+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	orl $TS_COMPAT, ASM_THREAD_INFO(TI_status, %rsp, SIZEOF_PTREGS)
 	IPIPE_IA32_SYSCALL %rax fast_exit_syscall ia32_ret_from_sys_call
-	testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	testl $_TIF_WORK_SYSCALL_ENTRY, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
 	jnz ia32_tracesys
 	cmpq $(IA32_NR_syscalls-1),%rax
 	ja ia32_badsys

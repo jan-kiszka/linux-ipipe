@@ -322,7 +322,7 @@ root_syscall:
 	/* Reload all the syscall registers. */
 	RESTORE_C_REGS_EXCEPT_RAX
 #endif /* CONFIG_IPIPE */
-	testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags+THREAD_INFO(%rsp,RIP)
+	testl $_TIF_WORK_SYSCALL_ENTRY,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
 	jnz tracesys
 system_call_fastpath:
 	test_syscall_nr ax
@@ -335,6 +335,9 @@ system_call_fastpath:
  * Has incompletely filled pt_regs, iret frame is also incomplete.
  */
 ret_from_sys_call:
+	testl $_TIF_ALLWORK_MASK,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	jnz int_ret_from_sys_call_fixup	/* Go the the slow path */
+
 	LOCKDEP_SYS_EXIT
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF

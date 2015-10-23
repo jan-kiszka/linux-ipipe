@@ -546,8 +546,7 @@ ENTRY(stub_\func)
 	CFI_STARTPROC
 	DEFAULT_FRAME 0, 8		/* offset 8: return address */
 	SAVE_EXTRA_REGS 8
-	call sys_\func
-	ret
+	jmp sys_\func
 	CFI_ENDPROC
 END(stub_\func)
 	.endm
@@ -574,8 +573,12 @@ return_from_execve:
 	jmp	int_ret_from_sys_call
 	CFI_ENDPROC
 END(stub_execve)
-
-ENTRY(stub_execveat)
+/*
+ * Remaining execve stubs are only 7 bytes long.
+ * ENTRY() often aligns to 16 bytes, which in this case has no benefits.
+ */
+	.align	8
+GLOBAL(stub_execveat)
 	CFI_STARTPROC
 	DEFAULT_FRAME 0, 8
 	call	sys_execveat
@@ -584,14 +587,16 @@ ENTRY(stub_execveat)
 END(stub_execveat)
 
 #ifdef CONFIG_X86_X32_ABI
-ENTRY(stub_x32_execve)
+	.align	8
+GLOBAL(stub_x32_execve)
 	CFI_STARTPROC
 	DEFAULT_FRAME 0, 8
 	call	compat_sys_execve
 	jmp	return_from_execve
 	CFI_ENDPROC
 END(stub_x32_execve)
-ENTRY(stub_x32_execveat)
+	.align	8
+GLOBAL(stub_x32_execveat)
 	CFI_STARTPROC
 	DEFAULT_FRAME 0, 8
 	call	compat_sys_execveat
@@ -601,13 +606,15 @@ END(stub_x32_execveat)
 #endif
 
 #ifdef CONFIG_IA32_EMULATION
-ENTRY(stub32_execve)
+	.align	8
+GLOBAL(stub32_execve)
 	CFI_STARTPROC
 	call	compat_sys_execve
 	jmp	return_from_execve
 	CFI_ENDPROC
 END(stub32_execve)
-ENTRY(stub32_execveat)
+	.align	8
+GLOBAL(stub32_execveat)
 	CFI_STARTPROC
 	call	compat_sys_execveat
 	jmp	return_from_execve
@@ -667,23 +674,21 @@ ENTRY(ret_from_fork)
 
 	call schedule_tail			# rdi: 'prev' task parameter
 
-	GET_THREAD_INFO(%rcx)
-
 	RESTORE_EXTRA_REGS
 
 	testl $3,CS(%rsp)			# from kernel_thread?
-	jz   1f
 
 	/*
 	 * By the time we get here, we have no idea whether our pt_regs,
 	 * ti flags, and ti status came from the 64-bit SYSCALL fast path,
 	 * the slow path, or one of the ia32entry paths.
-	 * Use int_ret_from_sys_call to return, since it can safely handle
+	 * Use IRET code path to return, since it can safely handle
 	 * all of the above.
 	 */
-	jmp  int_ret_from_sys_call
+	jnz	int_ret_from_sys_call
 
-1:
+	/* We came from kernel_thread */
+	/* nb: we depend on RESTORE_EXTRA_REGS above */
 	movq %rbp, %rdi
 	call *%rbx
 	movl $0, RAX(%rsp)
@@ -1628,7 +1633,6 @@ ENTRY(nmi)
 	/* If it is below the NMI stack, it is a normal NMI */
 	jb	first_nmi
 	/* Ah, it is within the NMI stack, treat it as nested */
-	jmp	nested_nmi
 
 	CFI_REMEMBER_STATE
 

@@ -848,7 +848,15 @@ ret_from_intr:
 	CFI_DEF_CFA_REGISTER	rsp
 	CFI_ADJUST_CFA_OFFSET	RBP-ARGOFFSET
 
-ENTRY(exit_intr)
+#ifdef CONFIG_IPIPE
+	jmp exit_intr
+ENTRY(root_irq_trampoline)
+	SAVE_ARGS
+	call *SS-ARGOFFSET+8(%rsp)	/* the handler */
+	cli
+#endif
+
+exit_intr:
 	GET_THREAD_INFO(%rcx)
 	testl $3,CS-ARGOFFSET(%rsp)
 	je retint_kernel

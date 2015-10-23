@@ -355,7 +355,14 @@ ENDPROC(ret_from_kernel_thread)
 	RING0_PTREGS_FRAME
 ret_from_exception:
 	preempt_stop(CLBR_ANY)
-ENTRY(ret_from_intr)
+#ifdef CONFIG_IPIPE
+	jmp ret_from_intr
+ENTRY(root_irq_trampoline)
+	SAVE_ALL
+	call *PT_EFLAGS+4(%esp)
+#endif
+
+ret_from_intr:
 	GET_THREAD_INFO(%ebp)
 #ifdef CONFIG_VM86
 	movl PT_EFLAGS(%esp), %eax	# mix EFLAGS and CS

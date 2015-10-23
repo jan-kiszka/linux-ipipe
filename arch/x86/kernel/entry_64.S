@@ -803,7 +803,7 @@ ENTRY(root_irq_trampoline)
 	ALLOC_PT_GPREGS_ON_STACK
 	SAVE_C_REGS
 	SAVE_EXTRA_REGS
-	call *SS+8(%rsp)      /* the handler */
+	call *SIZEOF_PTREGS(%rsp)      /* the handler */
 	cli
 #endif
 

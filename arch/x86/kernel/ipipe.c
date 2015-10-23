@@ -427,7 +427,7 @@ skip_kgdb:
 		ipipe_trace_panic_freeze();
 
 		/* Always warn about user land and unfixable faults. */
-		if (user_mode_vm(regs) ||
+		if (user_mode(regs) ||
 		    !search_exception_tables(instruction_pointer(regs))) {
 			printk(KERN_ERR "BUG: Unhandled exception over domain"
 			       " %s at 0x%lx - switching to ROOT\n",

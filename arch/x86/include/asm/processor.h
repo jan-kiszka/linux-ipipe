@@ -209,9 +209,24 @@ struct x86_hw_tss {
 	unsigned short		back_link, __blh;
 	unsigned long		sp0;
 	unsigned short		ss0, __ss0h;
-	unsigned long		sp1;
-	/* ss1 caches MSR_IA32_SYSENTER_CS: */
-	unsigned short		ss1, __ss1h;
+
+	/*
+	 * We don't use ring 1, so sp1 and ss1 are convenient scratch
+	 * spaces in the same cacheline as sp0.  We use them to cache
+	 * some MSR values to avoid unnecessary wrmsr instructions.
+	 *
+	 * We use SYSENTER_ESP to find sp0 and for the NMI emergency
+	 * stack, but we need to context switch it because we do
+	 * horrible things to the kernel stack in vm86 mode.
+	 *
+	 * We use SYSENTER_CS to disable sysenter in vm86 mode to avoid
+	 * corrupting the stack if we went through the sysenter path
+	 * from vm86 mode.
+	 */
+	unsigned long		sp1;	/* MSR_IA32_SYSENTER_ESP */
+	unsigned short		ss1;	/* MSR_IA32_SYSENTER_CS */
+
+	unsigned short		__ss1h;
 	unsigned long		sp2;
 	unsigned short		ss2, __ss2h;
 	unsigned long		__cr3;
@@ -276,9 +291,9 @@ struct tss_struct {
 	unsigned long		io_bitmap[IO_BITMAP_LONGS + 1];
 
 	/*
-	 * .. and then another 0x100 bytes for the emergency kernel stack:
+	 * Space for the temporary SYSENTER stack:
 	 */
-	unsigned long		stack[64];
+	unsigned long		SYSENTER_stack[64];
 
 } ____cacheline_aligned;
 
@@ -812,6 +827,9 @@ static inline void spin_lock_prefetch(const void *x)
 	prefetchw(x);
 }
 
+#define TOP_OF_INIT_STACK ((unsigned long)&init_stack + sizeof(init_stack) - \
+			   TOP_OF_KERNEL_STACK_PADDING)
+
 #ifdef CONFIG_X86_32
 /*
  * User space process size: 3GB (default).
@@ -822,7 +840,7 @@ static inline void spin_lock_prefetch(const void *x)
 #define STACK_TOP_MAX		STACK_TOP
 
 #define INIT_THREAD  {							  \
-	.sp0			= sizeof(init_stack) + (long)&init_stack, \
+	.sp0			= TOP_OF_INIT_STACK,			  \
 	.vm86_info		= NULL,					  \
 	.sysenter_cs		= __KERNEL_CS,				  \
 	.io_bitmap_ptr		= NULL,					  \
@@ -830,15 +848,8 @@ static inline void spin_lock_prefetch(const void *x)
 
 extern unsigned long thread_saved_pc(struct task_struct *tsk);
 
-#define THREAD_SIZE_LONGS      (THREAD_SIZE/sizeof(unsigned long))
-#define KSTK_TOP(info)                                                 \
-({                                                                     \
-       unsigned long *__ptr = (unsigned long *)(info);                 \
-       (unsigned long)(&__ptr[THREAD_SIZE_LONGS]);                     \
-})
-
 /*
- * The below -8 is to reserve 8 bytes on top of the ring0 stack.
+ * TOP_OF_KERNEL_STACK_PADDING reserves 8 bytes on top of the ring0 stack.
  * This is necessary to guarantee that the entire "struct pt_regs"
  * is accessible even if the CPU haven't stored the SS/ESP registers
  * on the stack (interrupt gate does not save these registers
@@ -847,11 +858,11 @@ extern unsigned long thread_saved_pc(struct task_struct *tsk);
  * "struct pt_regs" is possible, but they may contain the
  * completely wrong values.
  */
-#define task_pt_regs(task)                                             \
-({                                                                     \
-       struct pt_regs *__regs__;                                       \
-       __regs__ = (struct pt_regs *)(KSTK_TOP(task_stack_page(task))-8); \
-       __regs__ - 1;                                                   \
+#define task_pt_regs(task) \
+({									\
+	unsigned long __ptr = (unsigned long)task_stack_page(task);	\
+	__ptr += THREAD_SIZE - TOP_OF_KERNEL_STACK_PADDING;		\
+	((struct pt_regs *)__ptr) - 1;					\
 })
 
 #define KSTK_ESP(task)		(task_pt_regs(task)->sp)
@@ -883,7 +894,7 @@ extern unsigned long thread_saved_pc(struct task_struct *tsk);
 #define STACK_TOP_MAX		TASK_SIZE_MAX
 
 #define INIT_THREAD  { \
-	.sp0 = (unsigned long)&init_stack + sizeof(init_stack) \
+	.sp0 = TOP_OF_INIT_STACK \
 }
 
 /*

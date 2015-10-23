@@ -51,39 +51,6 @@ static inline unsigned long __ipipe_ffnz(unsigned long ul)
 
 struct irq_desc;
 
-#define __root_irq_trampoline(__handler__, __regs__)			\
-	do {								\
-		__asm__ __volatile__("movq   %%rsp, %%rax\n\t"		\
-				     "pushq  $0\n\t"			\
-				     "pushq  %%rax\n\t"			\
-				     "pushfq \n\t"			\
-				     "orq    %[x86if],(%%rsp)\n\t"	\
-				     "pushq  %[kernel_cs]\n\t"		\
-				     "pushq  $1f\n\t"			\
-				     "pushq  %[vector]\n\t"		\
-				     "subq   $9*8,%%rsp\n\t"		\
-				     "movq   %%rdi,8*8(%%rsp)\n\t"	\
-				     "movq   %%rsi,7*8(%%rsp)\n\t"	\
-				     "movq   %%rdx,6*8(%%rsp)\n\t"	\
-				     "movq   %%rcx,5*8(%%rsp)\n\t"	\
-				     "movq   %%rax,4*8(%%rsp)\n\t"	\
-				     "movq   %%r8,3*8(%%rsp)\n\t"	\
-				     "movq   %%r9,2*8(%%rsp)\n\t"	\
-				     "movq   %%r10,1*8(%%rsp)\n\t"	\
-				     "movq   %%r11,(%%rsp)\n\t"		\
-				     "call   *%[handler]\n\t"		\
-				     "cli\n\t"				\
-				     "jmp    exit_intr\n\t"		\
-				     "1:     cli\n"			\
-				     : /* no output */			\
-				     : [kernel_cs] "i" (__KERNEL_CS),	\
-				     [vector] "rm" (__regs__->orig_ax),	\
-				     [handler] "r" (__handler__),	\
-				       "D" (__regs__),			\
-				     [x86if] "i" (X86_EFLAGS_IF)	\
-				     : "rax");				\
-	} while (0)
-
 #ifdef CONFIG_PREEMPT
 #define __ipipe_check_root_resched()			\
 	(preempt_count() == 0 && need_resched() &&	\

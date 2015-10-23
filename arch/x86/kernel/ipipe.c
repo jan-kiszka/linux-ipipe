@@ -83,11 +83,70 @@ void __ipipe_do_IRQ(unsigned int irq, void *cookie)
 {
 	void (*handler)(struct pt_regs *regs);
 	struct pt_regs *regs;
+#ifdef CONFIG_X86_64
+	register int64_t r12 asm("r12");
+#endif
 
 	regs = raw_cpu_ptr(&ipipe_percpu.tick_regs);
 	regs->orig_ax = ~__ipipe_get_irq_vector(irq);
 	handler = (typeof(handler))cookie;
-	__root_irq_trampoline(handler, regs);
+#ifdef CONFIG_X86_64
+	r12 = (int64_t) handler;
+	asm volatile("movq   %%rsp, %%rax\n"
+		     "pushq  $0\n"
+		     "pushq  %%rax\n"
+		     "pushfq \n"
+		     "orq    %[x86if],(%%rsp)\n"
+		     "pushq  %[kernel_cs]\n"
+		     "pushq  $1f\n"
+		     "pushq  %[vector]\n"
+		     "subq   $9*8,%%rsp\n"
+		     "movq   %%rdi,8*8(%%rsp)\n"
+		     "movq   %%rsi,7*8(%%rsp)\n"
+		     "movq   %%rdx,6*8(%%rsp)\n"
+		     "movq   %%rcx,5*8(%%rsp)\n"
+		     "movq   %%rax,4*8(%%rsp)\n"
+		     "movq   %%r8,3*8(%%rsp)\n"
+		     "movq   %%r9,2*8(%%rsp)\n"
+		     "movq   %%r10,1*8(%%rsp)\n"
+		     "movq   %%r11,(%%rsp)\n"
+		     "call   *%%r12\n"
+		     "cli\n"
+		     "jmp    exit_intr\n"
+		     "1:     cli\n"
+		     : /* no output */
+		     : [kernel_cs] "i" (__KERNEL_CS),
+		     [vector] "rm" (regs->orig_ax),
+		       "r" ( r12 ),
+		       "D" (regs),
+		     [x86if] "i" (X86_EFLAGS_IF)
+		     : "rax");
+#else
+	asm volatile("pushfl\n\t"
+		     "orl   %[x86if],(%%esp)\n\t"
+		     "pushl %%cs\n\t"
+		     "pushl $1f\n\t"
+		     "pushl %%eax\n\t"
+		     "pushl %%gs\n\t"
+		     "pushl %%fs\n\t"
+		     "pushl %%es\n\t"
+		     "pushl %%ds\n\t"
+		     "pushl %%eax\n\t"
+		     "pushl %%ebp\n\t"
+		     "pushl %%edi\n\t"
+		     "pushl %%esi\n\t"
+		     "pushl %%edx\n\t"
+		     "pushl %%ecx\n\t"
+		     "pushl %%ebx\n\t"
+		     "call  *%1\n\t"
+		     "jmp   ret_from_intr\n\t"
+		     "1:    cli\n"
+		     : /* no output */
+		     : "a" (regs),
+		       "r" (handler),
+		       [x86if] "i" (X86_EFLAGS_IF));
+
+#endif
 }
 
 #ifdef CONFIG_X86_LOCAL_APIC

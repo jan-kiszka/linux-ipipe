@@ -64,31 +64,4 @@ static inline unsigned long __ipipe_ffnz(unsigned long ul)
 
 struct irq_desc;
 
-#define __root_irq_trampoline(__handler__, __regs__)			\
-	do {								\
-		__asm__ __volatile__("pushfl\n\t"			\
-				     "orl   %[x86if],(%%esp)\n\t"	\
-				     "pushl %%cs\n\t"			\
-				     "pushl $1f\n\t"			\
-				     "pushl %%eax\n\t"			\
-				     "pushl %%gs\n\t"			\
-				     "pushl %%fs\n\t"			\
-				     "pushl %%es\n\t"			\
-				     "pushl %%ds\n\t"			\
-				     "pushl %%eax\n\t"			\
-				     "pushl %%ebp\n\t"			\
-				     "pushl %%edi\n\t"			\
-				     "pushl %%esi\n\t"			\
-				     "pushl %%edx\n\t"			\
-				     "pushl %%ecx\n\t"			\
-				     "pushl %%ebx\n\t"			\
-				     "call  *%1\n\t"			\
-				     "jmp   ret_from_intr\n\t"		\
-				     "1:    cli\n"			\
-				     : /* no output */			\
-				     : "a" (__regs__),			\
-				       "r" (__handler__),		\
-				       [x86if] "i" (X86_EFLAGS_IF));	\
-	} while (0)
-
 #endif	/* !__X86_IPIPE_32_H */

@@ -123,7 +123,7 @@ void show_regs(struct pt_regs *regs)
 	int i;
 
 	show_regs_print_info(KERN_EMERG);
-	__show_regs(regs, !user_mode_vm(regs));
+	__show_regs(regs, !user_mode(regs));
 #ifdef CONFIG_IPIPE
 	pr_emerg("I-pipe domain %s\n", ipipe_current_domain->name);
 #endif /* CONFIG_IPIPE */
@@ -132,7 +132,7 @@ void show_regs(struct pt_regs *regs)
 	 * When in-kernel, we also print out the stack and code at the
 	 * time of the fault..
 	 */
-	if (!user_mode_vm(regs)) {
+	if (!user_mode(regs)) {
 		unsigned int code_prologue = code_bytes * 43 / 64;
 		unsigned int code_len = code_bytes;
 		unsigned char c;

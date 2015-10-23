@@ -523,8 +523,6 @@ EXPORT_SYMBOL_GPL(__switch_to);
 EXPORT_SYMBOL_GPL(show_stack);
 EXPORT_PER_CPU_SYMBOL_GPL(fpu_owner_task);
 
-EXPORT_PER_CPU_SYMBOL_GPL(init_tss);
-
 #if defined(CONFIG_SMP) || defined(CONFIG_DEBUG_SPINLOCK)
 EXPORT_SYMBOL(tasklist_lock);
 #endif /* CONFIG_SMP || CONFIG_DEBUG_SPINLOCK */

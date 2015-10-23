@@ -416,8 +416,8 @@ GLOBAL(int_with_check)
 	andl %edi,%edx
 	jnz   int_careful
 int_retint:
-	andl    $~TS_COMPAT,TI_status(%rcx)
-	jmp   retint_swapgs
+	andl	$~TS_COMPAT,TI_status(%rcx)
+	jmp	syscall_return
 
 GLOBAL(int_fast_exit)
 	DISABLE_INTERRUPTS(CLBR_NONE)
@@ -438,7 +438,6 @@ int_careful:
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
 	jmp int_with_check
-
 	/* handle signals and tracing -- both require a full pt_regs */
 int_very_careful:
 	TRACE_IRQS_ON
@@ -466,8 +465,81 @@ int_restore_rest:
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
 	jmp int_with_check
+
+syscall_return:
+	/*
+	 * Try to use SYSRET instead of IRET if we're returning to
+	 * a completely clean 64-bit userspace context.
+	 */
+	movq RCX(%rsp),%rcx
+	cmpq %rcx,RIP(%rsp)		/* RCX == RIP */
+	jne opportunistic_sysret_failed
+
+	/*
+	 * On Intel CPUs, sysret with non-canonical RCX/RIP will #GP
+	 * in kernel space.  This essentially lets the user take over
+	 * the kernel, since userspace controls RSP.  It's not worth
+	 * testing for canonicalness exactly -- this check detects any
+	 * of the 17 high bits set, which is true for non-canonical
+	 * or kernel addresses.  (This will pessimize vsyscall=native.
+	 * Big deal.)
+	 *
+	 * If virtual addresses ever become wider, this will need
+	 * to be updated to remain correct on both old and new CPUs.
+	 */
+	.ifne __VIRTUAL_MASK_SHIFT - 47
+	.error "virtual address width changed -- sysret checks need update"
+	.endif
+	shr $__VIRTUAL_MASK_SHIFT, %rcx
+	jnz opportunistic_sysret_failed
+
+	cmpq $__USER_CS,CS(%rsp)	/* CS must match SYSRET */
+	jne opportunistic_sysret_failed
+
+	movq R11(%rsp),%r11
+	cmpq %r11,EFLAGS(%rsp)		/* R11 == RFLAGS */
+	jne opportunistic_sysret_failed
+
+	/*
+	 * SYSRET can't restore RF.  SYSRET can restore TF, but unlike IRET,
+	 * restoring TF results in a trap from userspace immediately after
+	 * SYSRET.  This would cause an infinite loop whenever #DB happens
+	 * with register state that satisfies the opportunistic SYSRET
+	 * conditions.  For example, single-stepping this user code:
+	 *
+	 *           movq $stuck_here,%rcx
+	 *           pushfq
+	 *           popq %r11
+	 *   stuck_here:
+	 *
+	 * would never get past 'stuck_here'.
+	 */
+	testq $(X86_EFLAGS_RF|X86_EFLAGS_TF), %r11
+	jnz opportunistic_sysret_failed
+
+	/* nothing to check for RSP */
+
+	cmpq $__USER_DS,SS(%rsp)	/* SS must match SYSRET */
+	jne opportunistic_sysret_failed
+
+	/*
+	 * We win!  This label is here just for ease of understanding
+	 * perf profiles.  Nothing jumps here.
+	 */
+irq_return_via_sysret:
+	CFI_REMEMBER_STATE
+	/* r11 is already restored (see code above) */
+	RESTORE_C_REGS_EXCEPT_R11
+	movq RSP(%rsp),%rsp
+	USERGS_SYSRET64
+	CFI_RESTORE_STATE
+
+opportunistic_sysret_failed:
+	SWAPGS
+	jmp	restore_c_regs_and_iret
 	CFI_ENDPROC
 END(system_call)
+
 
 	.macro FORK_LIKE func
 ENTRY(stub_\func)
@@ -741,8 +813,8 @@ common_interrupt:
 	CFI_DEF_CFA_REGISTER	rsp
 	CFI_ADJUST_CFA_OFFSET	RBP
 	testl $3,CS(%rsp)
-	jz restore_args
-	jmp retint_swapgs_notrace
+	jz restore_c_regs_and_iret
+	jmp syscall_return
 #endif /* CONFIG_IPIPE */
 	/* 0(%rsp): old RSP */
 ret_from_intr:
@@ -791,78 +863,8 @@ retint_swapgs:		/* return to user-space */
 	 * The iretq could re-enable interrupts:
 	 */
 	TRACE_IRQS_IRETQ
-retint_swapgs_notrace:
-	/*
-	 * Try to use SYSRET instead of IRET if we're returning to
-	 * a completely clean 64-bit userspace context.
-	 */
-	movq RCX(%rsp),%rcx
-	cmpq %rcx,RIP(%rsp)		/* RCX == RIP */
-	jne opportunistic_sysret_failed
-
-	/*
-	 * On Intel CPUs, sysret with non-canonical RCX/RIP will #GP
-	 * in kernel space.  This essentially lets the user take over
-	 * the kernel, since userspace controls RSP.  It's not worth
-	 * testing for canonicalness exactly -- this check detects any
-	 * of the 17 high bits set, which is true for non-canonical
-	 * or kernel addresses.  (This will pessimize vsyscall=native.
-	 * Big deal.)
-	 *
-	 * If virtual addresses ever become wider, this will need
-	 * to be updated to remain correct on both old and new CPUs.
-	 */
-	.ifne __VIRTUAL_MASK_SHIFT - 47
-	.error "virtual address width changed -- sysret checks need update"
-	.endif
-	shr $__VIRTUAL_MASK_SHIFT, %rcx
-	jnz opportunistic_sysret_failed
-
-	cmpq $__USER_CS,CS(%rsp)	/* CS must match SYSRET */
-	jne opportunistic_sysret_failed
-
-	movq R11(%rsp),%r11
-	cmpq %r11,EFLAGS(%rsp)		/* R11 == RFLAGS */
-	jne opportunistic_sysret_failed
-
-	/*
-	 * SYSRET can't restore RF.  SYSRET can restore TF, but unlike IRET,
-	 * restoring TF results in a trap from userspace immediately after
-	 * SYSRET.  This would cause an infinite loop whenever #DB happens
-	 * with register state that satisfies the opportunistic SYSRET
-	 * conditions.  For example, single-stepping this user code:
-	 *
-	 *           movq $stuck_here,%rcx
-	 *           pushfq
-	 *           popq %r11
-	 *   stuck_here:
-	 *
-	 * would never get past 'stuck_here'.
-	 */
-	testq $(X86_EFLAGS_RF|X86_EFLAGS_TF), %r11
-	jnz opportunistic_sysret_failed
-
-	/* nothing to check for RSP */
-
-	cmpq $__USER_DS,SS(%rsp)	/* SS must match SYSRET */
-	jne opportunistic_sysret_failed
-
-	/*
-	 * We win!  This label is here just for ease of understanding
-	 * perf profiles.  Nothing jumps here.
-	 */
-irq_return_via_sysret:
-	CFI_REMEMBER_STATE
-	/* r11 is already restored (see code above) */
-	RESTORE_C_REGS_EXCEPT_R11
-	movq RSP(%rsp),%rsp
-	USERGS_SYSRET64
-	CFI_RESTORE_STATE
-
-opportunistic_sysret_failed:
 	SWAPGS
-retint_noswapgs:
-	jmp restore_args
+	jmp restore_c_regs_and_iret
 
 /* Returning to kernel space */
 retint_kernel:
@@ -890,7 +892,11 @@ retint_kernel:
 	 * The iretq could re-enable interrupts:
 	 */
 	TRACE_IRQS_IRETQ
-restore_args:
+/*
+ * At this label, code paths which return to kernel and to user,
+ * which come from interrupts/exception and from syscalls, merge.
+ */
+restore_c_regs_and_iret:
 	RESTORE_C_REGS
 	REMOVE_PT_GPREGS_FROM_STACK 8
 
@@ -996,8 +1002,8 @@ ENTRY(\sym)
 	CFI_DEF_CFA_REGISTER    rsp
 	CFI_ADJUST_CFA_OFFSET   RBP
 	testl $3,CS(%rsp)
-	jz restore_args
-	jmp retint_swapgs_notrace
+	jz restore_c_regs_and_iret
+	jmp syscall_return
 	CFI_ENDPROC
 END(\sym)
 .endm
@@ -1167,8 +1173,8 @@ ENTRY(\sym)
 	RESTORE_EXTRA_REGS
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	testl %eax,%eax
-	jne retint_noswapgs
-	jmp retint_swapgs_notrace
+	jne restore_c_regs_and_iret
+	jmp syscall_return
 	.endif
 2:
 #endif

@@ -770,7 +770,7 @@ common_interrupt:
 	jz restore_args
 	jmp retint_swapgs_notrace
 #endif /* CONFIG_IPIPE */
-	/* 0(%rsp): rsp_scratch */
+	/* 0(%rsp): old RSP */
 ret_from_intr:
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF

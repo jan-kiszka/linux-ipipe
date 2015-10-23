@@ -326,9 +326,6 @@ system_call_fastpath:
  * Has incompletely filled pt_regs, iret frame is also incomplete.
  */
 ret_from_sys_call:
-	testl $_TIF_ALLWORK_MASK,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
-	jnz int_ret_from_sys_call_fixup	/* Go the the slow path */
-
 	LOCKDEP_SYS_EXIT
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
@@ -341,8 +338,8 @@ ret_from_sys_call:
 	 * flags (TIF_NOTIFY_RESUME, TIF_USER_RETURN_NOTIFY, etc) set is
 	 * very bad.
 	 */
-	testl $_TIF_ALLWORK_MASK,TI_flags+THREAD_INFO(%rsp,RIP)
-	jnz int_ret_from_sys_call_fixup	/* Go the the slow path */
+	testl $_TIF_ALLWORK_MASK,TI_flags+THREAD_INFO(%rsp,SIZEOF_PTREGS)
+	jnz int_ret_from_sys_call	/* Go the slow path */
 
 	CFI_REMEMBER_STATE
 	/*
@@ -364,9 +361,6 @@ sysret_fastexit:
 	USERGS_SYSRET64
 
 	CFI_RESTORE_STATE
-
-int_ret_from_sys_call_fixup:
-	jmp int_ret_from_sys_call_irqs_off
 
 	/* Do syscall entry tracing */
 tracesys:

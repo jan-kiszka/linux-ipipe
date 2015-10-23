@@ -326,6 +326,7 @@ system_call_fastpath:
  * Has incompletely filled pt_regs, iret frame is also incomplete.
  */
 ret_from_sys_call:
+
 	LOCKDEP_SYS_EXIT
 	DISABLE_INTERRUPTS(CLBR_NONE)
 	TRACE_IRQS_OFF
@@ -339,7 +340,7 @@ ret_from_sys_call:
 	 * very bad.
 	 */
 	testl $_TIF_ALLWORK_MASK, ASM_THREAD_INFO(TI_flags, %rsp, SIZEOF_PTREGS)
-	jnz int_ret_from_sys_call	/* Go the slow path */
+	jnz int_ret_from_sys_call_irqs_off	/* Go to the slow path */
 
 	CFI_REMEMBER_STATE
 	/*

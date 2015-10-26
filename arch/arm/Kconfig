@@ -373,9 +373,9 @@ config ARCH_AT91
 	select ARCH_REQUIRE_GPIOLIB
 	select CLKDEV_LOOKUP
 	select IRQ_DOMAIN
-	select NEED_MACH_IO_H if PCCARD
 	select PINCTRL
 	select PINCTRL_AT91
+	select SOC_BUS
 	select USE_OF
 	select ATMEL_TCLIB if IPIPE
 	help
@@ -640,18 +640,6 @@ config ARCH_PXA
 	help
 	  Support for Intel/Marvell's PXA2xx/PXA3xx processor line.
 
-config ARCH_MSM
-	bool "Qualcomm MSM (non-multiplatform)"
-	select ARCH_REQUIRE_GPIOLIB
-	select COMMON_CLK
-	select GENERIC_CLOCKEVENTS
-	help
-	  Support for Qualcomm MSM/QSD based systems.  This runs on the
-	  apps processor of the MSM/QSD and depends on a shared memory
-	  interface to the modem processor which runs the baseband
-	  stack and controls some vital subsystems
-	  (clock and power control, etc).
-
 config ARCH_SHMOBILE_LEGACY
 	bool "Renesas ARM SoCs (non-multiplatform)"
 	select ARCH_SHMOBILE
@@ -860,6 +848,8 @@ config ARCH_VIRT
 #
 source "arch/arm/mach-mvebu/Kconfig"
 
+source "arch/arm/mach-alpine/Kconfig"
+
 source "arch/arm/mach-asm9260/Kconfig"
 
 source "arch/arm/mach-at91/Kconfig"
@@ -905,8 +895,6 @@ source "arch/arm/mach-keystone/Kconfig"
 source "arch/arm/mach-ks8695/Kconfig"
 
 source "arch/arm/mach-meson/Kconfig"
-
-source "arch/arm/mach-msm/Kconfig"
 
 source "arch/arm/mach-moxart/Kconfig"
 
@@ -2176,6 +2164,8 @@ endmenu
 source "net/Kconfig"
 
 source "drivers/Kconfig"
+
+source "drivers/firmware/Kconfig"
 
 source "fs/Kconfig"
 

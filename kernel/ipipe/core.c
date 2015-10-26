@@ -1542,7 +1542,7 @@ void __ipipe_do_critical_sync(unsigned int irq, void *cookie)
 {
 	int cpu = ipipe_processor_id();
 
-	cpu_set(cpu, __ipipe_cpu_sync_map);
+	cpumask_set_cpu(cpu, &__ipipe_cpu_sync_map);
 
 	/*
 	 * Now we are in sync with the lock requestor running on
@@ -1557,11 +1557,11 @@ void __ipipe_do_critical_sync(unsigned int irq, void *cookie)
 	if (__ipipe_cpu_sync)
 		__ipipe_cpu_sync();
 
-	cpu_set(cpu, __ipipe_cpu_pass_map);
+	cpumask_set_cpu(cpu, &__ipipe_cpu_pass_map);
 
 	spin_unlock(&__ipipe_cpu_barrier);
 
-	cpu_clear(cpu, __ipipe_cpu_sync_map);
+	cpumask_clear_cpu(cpu, &__ipipe_cpu_sync_map);
 }
 #endif	/* CONFIG_SMP */
 
@@ -1579,7 +1579,7 @@ unsigned long ipipe_critical_enter(void (*syncfn)(void))
 #ifdef CONFIG_SMP
 
 	cpu = ipipe_processor_id();
-	if (!cpu_test_and_set(cpu, __ipipe_cpu_lock_map)) {
+	if (!cpumask_test_and_set_cpu(cpu, &__ipipe_cpu_lock_map)) {
 		while (test_and_set_bit(0, &__ipipe_critical_lock)) {
 			n = 0;
 			hard_local_irq_enable();
@@ -1596,18 +1596,18 @@ restart:
 
 		__ipipe_cpu_sync = syncfn;
 
-		cpus_clear(__ipipe_cpu_pass_map);
-		cpu_set(cpu, __ipipe_cpu_pass_map);
+		cpumask_clear(&__ipipe_cpu_pass_map);
+		cpumask_set_cpu(cpu, &__ipipe_cpu_pass_map);
 
 		/*
 		 * Send the sync IPI to all processors but the current
 		 * one.
 		 */
-		cpus_andnot(allbutself, online, __ipipe_cpu_pass_map);
+		cpumask_andnot(&allbutself, &online, &__ipipe_cpu_pass_map);
 		ipipe_send_ipi(IPIPE_CRITICAL_IPI, allbutself);
 		loops = IPIPE_CRITICAL_TIMEOUT;
 
-		while (!cpus_equal(__ipipe_cpu_sync_map, allbutself)) {
+		while (!cpumask_equal(&__ipipe_cpu_sync_map, &allbutself)) {
 			if (--loops > 0) {
 				cpu_relax();
 				continue;
@@ -1624,7 +1624,7 @@ restart:
 			 * running __ipipe_cpu_sync prematurely. This
 			 * usually resolves the deadlock reason too.
 			 */
-			while (!cpus_equal(online, __ipipe_cpu_pass_map))
+			while (!cpumask_equal(&online, &__ipipe_cpu_pass_map))
 				cpu_relax();
 
 			goto restart;
@@ -1649,9 +1649,9 @@ void ipipe_critical_exit(unsigned long flags)
 #ifdef CONFIG_SMP
 	if (atomic_dec_and_test(&__ipipe_critical_count)) {
 		spin_unlock(&__ipipe_cpu_barrier);
-		while (!cpus_empty(__ipipe_cpu_sync_map))
+		while (!cpumask_empty(&__ipipe_cpu_sync_map))
 			cpu_relax();
-		cpu_clear(ipipe_processor_id(), __ipipe_cpu_lock_map);
+		cpumask_clear_cpu(ipipe_processor_id(), &__ipipe_cpu_lock_map);
 		clear_bit(0, &__ipipe_critical_lock);
 		smp_mb__after_atomic();
 	}

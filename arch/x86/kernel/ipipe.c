@@ -260,8 +260,8 @@ void ipipe_set_irq_affinity(unsigned int irq, cpumask_t cpumask)
 	if (WARN_ON_ONCE(irq_get_chip(irq)->irq_set_affinity == NULL))
 		return;
 
-	cpus_and(cpumask, cpumask, *cpu_online_mask);
-	if (WARN_ON_ONCE(cpus_empty(cpumask)))
+	cpumask_and(&cpumask, &cpumask, cpu_online_mask);
+	if (WARN_ON_ONCE(cpumask_empty(&cpumask)))
 		return;
 
 	irq_get_chip(irq)->irq_set_affinity(irq_get_irq_data(irq), &cpumask, true);
@@ -274,8 +274,8 @@ void ipipe_send_ipi(unsigned int ipi, cpumask_t cpumask)
 
 	flags = hard_local_irq_save();
 
-	cpu_clear(ipipe_processor_id(), cpumask);
-	if (likely(!cpus_empty(cpumask)))
+	cpumask_clear_cpu(ipipe_processor_id(), &cpumask);
+	if (likely(!cpumask_empty(&cpumask)))
 		apic->send_IPI_mask(&cpumask, ipipe_apic_irq_vector(ipi));
 
 	hard_local_irq_restore(flags);

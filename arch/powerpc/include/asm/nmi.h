@@ -1,9 +1,4 @@
-/*
- *  linux/include/asm-powerpc/nmi.h
- */
-#ifndef ASM_NMI_H
-#define ASM_NMI_H
+#ifndef _ASM_NMI_H
+#define _ASM_NMI_H
 
-extern void touch_nmi_watchdog(void);
-
-#endif /* ASM_NMI_H */
+#endif /* _ASM_NMI_H */

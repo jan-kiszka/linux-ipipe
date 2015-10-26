@@ -394,10 +394,10 @@ static void __init imx6q_init_irq(void)
 		mx6_pic_muter_register();
 	}
 #endif /* CONFIG_IPIPE */
+	imx_gpc_check_dt();
 	imx_init_revision_from_anatop();
 	imx_init_l2cache();
 	imx_src_init();
-	imx_gpc_init();
 	irqchip_init();
 }
 

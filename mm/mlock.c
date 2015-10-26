@@ -767,7 +767,7 @@ int __ipipe_pin_vma(struct mm_struct *mm, struct vm_area_struct *vma)
 
 	if (!((vma->vm_flags & VM_DONTEXPAND) ||
 	    is_vm_hugetlb_page(vma) || vma == get_gate_vma(mm))) {
-		ret = __mlock_vma_pages_range(vma, vma->vm_start, vma->vm_end,
+		ret = populate_vma_page_range(vma, vma->vm_start, vma->vm_end,
 					      NULL);
 		return ret < 0 ? ret : 0;
 	}

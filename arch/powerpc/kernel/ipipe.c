@@ -99,8 +99,8 @@ static void __ipipe_ipi_demux(int irq, struct pt_regs *regs)
 	 * The debugger IPI handler should be NMI-safe, so let's call
 	 * it immediately in case the IPI is pending.
 	 */
-	if (cpu_isset(cpu, __ipipe_dbrk_pending)) {
-		cpu_clear(cpu, __ipipe_dbrk_pending);
+	if (cpumask_test_cpu(cpu, &__ipipe_dbrk_pending)) {
+		cpumask_clear_cpu(cpu, &__ipipe_dbrk_pending);
 		debugger_ipi(regs);
 	}
 #endif /* CONFIG_DEBUGGER */
@@ -113,7 +113,7 @@ void ipipe_set_irq_affinity(unsigned int irq, cpumask_t cpumask)
 	if (WARN_ON_ONCE(irq_get_chip(irq)->irq_set_affinity == NULL))
 		return;
 
-	if (WARN_ON_ONCE(cpumask_any_and(&cpumask, cpu_online_mask) >= nr_cpu_ids))
+	if (WARN_ON_ONCE(cpumask_any_and(&cpumask, &cpu_online_mask) >= nr_cpu_ids))
 		return;
 
 	irq_get_chip(irq)->irq_set_affinity(irq_get_irq_data(irq), &cpumask, true);
@@ -129,12 +129,12 @@ void ipipe_send_ipi(unsigned int ipi, cpumask_t cpumask)
 
 	ipi -= IPIPE_BASE_IPI_OFFSET;
 	for_each_online_cpu(cpu) {
-		if (cpu_isset(cpu, cpumask))
+		if (cpumask_test_cpu(cpu, &cpumask))
 			set_bit(ipi, &per_cpu(ipipe_ipi_message, cpu).value);
 	}
 	mb();
 
-	if (unlikely(cpus_empty(cpumask)))
+	if (unlikely(cpumask_empty(&cpumask)))
 		goto out;
 
 	me = ipipe_processor_id();

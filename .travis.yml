@@ -1,0 +1,11 @@
+language: c
+
+compiler:
+  - gcc
+
+script:
+  - mkdir -p build
+  - cp ci-config build/.config
+  - make O=build olddefconfig
+  - cd build
+  - make -j $(($(nproc) * 2))

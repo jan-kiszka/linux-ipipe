@@ -1,0 +1,12 @@
+language: c
+
+compiler:
+  - gcc
+
+build:
+  ci:
+    - mkdir -p build
+    - cp shippable-config build/.config
+    - make O=build oldyesconfig
+    - cd build
+    - make -j $(($(nproc) * 2))
